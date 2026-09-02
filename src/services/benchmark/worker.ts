@@ -1,16 +1,23 @@
 /* eslint-disable no-await-in-loop */
 declare const self: DedicatedWorkerGlobalScope;
-import { Bench, BenchmarkOptions } from "benchmate";
+import { Bench, BenchmarkOptions, blackhole } from "benchmate";
 import { serializeError } from "serialize-error";
+import { benchmark } from "@/config";
 import { MainToWorkerMessage, WorkerToMainMessage } from "./types";
 
 const log = console.log;
 
 const CONSOLE_FLUSH_INTERVAL_MS = 500;
+// auto mode emits one progress event per measured block (thousands per second for
+// fast tasks) and fixed mode one per whole percent; forwarding each one floods the
+// main thread, so updates are coalesced
+const PROGRESS_UPDATE_INTERVAL_MS = 100;
 
+// fixed time mode completes with a batch-t interval on every machine; auto mode's
+// pilot dependence hunt cannot finish within its own budget under correlated
+// browser noise (boost clocks, GC) and ends dependence-unresolved instead
 const DEFAULT_OPTIONS: BenchmarkOptions = {
-  iterations: "auto",
-  time: 3000,
+  timeMs: benchmark.fixedTimeMs,
   method: "auto",
   quiet: true,
 };
@@ -67,49 +74,139 @@ const postMessage = (message: WorkerToMainMessage) => {
   self.postMessage(message);
 };
 
+// benchmate progress counters cover one phase at a time and reset when the phase
+// changes; TaskTracker folds them into one task-wide timeline and adds wall-clock timing
+interface TaskTracker {
+  startedAt: number;
+  phase: string | null;
+  finishedPhasesMs: number;
+  finishedPhasesOps: number;
+  phaseMs: number;
+  phaseOps: number;
+  lastUpdateSentAt: number;
+  lastSentMeasuredMs: number;
+  lastSentOps: number;
+}
+
 const handleStartRuns = async (
   runs: { runId: string; processedCode: string }[],
-  options: Partial<BenchmarkOptions> = {},
+  options: BenchmarkOptions = DEFAULT_OPTIONS,
 ) => {
   try {
-    // setup runner
-    const benchmateOptions: BenchmarkOptions = {
-      ...DEFAULT_OPTIONS,
-      ...options,
-      batching: { enabled: true, size: "auto", ...options?.batching },
-      warmup: { enabled: true, iterations: "auto", ...options?.warmup },
-      setup: (task) => {
-        // patch globals
-        patchConsole(task.name);
-      },
+    // the blackhole source transform references this global so bundled user
+    // modules can consume discarded expression values without importing benchmate
+    (globalThis as Record<string, unknown>).__benchmateBlackhole = blackhole;
+
+    const trackers = new Map<string, TaskTracker>();
+    const getTracker = (runId: string): TaskTracker => {
+      let tracker = trackers.get(runId);
+      if (!tracker) {
+        tracker = {
+          startedAt: Date.now(),
+          phase: null,
+          finishedPhasesMs: 0,
+          finishedPhasesOps: 0,
+          phaseMs: 0,
+          phaseOps: 0,
+          lastUpdateSentAt: 0,
+          lastSentMeasuredMs: 0,
+          lastSentOps: 0,
+        };
+        trackers.set(runId, tracker);
+      }
+      return tracker;
     };
-    const runner = new Bench(benchmateOptions);
 
-    // mute console
-    patchConsole("none", true);
-
-    // setup event handlers
-    runner.on("taskWarmupStart", ({ task: runId }) => {
-      postMessage({ type: "warmupStart", runId });
-    });
-
-    runner.on("taskWarmupEnd", ({ task: runId }) => {
-      postMessage({ type: "warmupEnd", runId });
-    });
-
-    runner.on("progress", ({ task: runId, iterationsCompleted, iterationsTotal, elapsedTime }) => {
-      postMessage({
-        type: "progress",
-        runId,
-        progress: (iterationsCompleted / iterationsTotal) * 100,
-        iterationsCompleted,
-        totalIterations: iterationsTotal,
-        elapsedTime,
-      });
-    });
+    const runner = new Bench(options);
 
     runner.on("taskStart", ({ task: runId }) => {
+      getTracker(runId);
+      // patch globals
+      patchConsole(runId);
       postMessage({ type: "taskStart", runId });
+    });
+
+    runner.on("taskPhaseStart", ({ task: runId, phase }) => {
+      postMessage({ type: "phase", runId, phase });
+      if (phase === "warmup") postMessage({ type: "warmupStart", runId });
+    });
+
+    runner.on("taskPhaseEnd", ({ task: runId, phase }) => {
+      if (phase === "warmup") postMessage({ type: "warmupEnd", runId });
+    });
+
+    runner.on("taskEvidenceStatus", ({ task: runId, status, reasons }) => {
+      postMessage({ type: "evidenceStatus", runId, status, reasons: [...reasons] });
+    });
+
+    runner.on("progress", (progress) => {
+      const tracker = getTracker(progress.task);
+      const now = Date.now();
+
+      if ("iterationsTotal" in progress) {
+        // fixed mode: intermediate events fire per whole percent during measurement,
+        // with counters covering the measurement phase only
+        if (now - tracker.lastUpdateSentAt < PROGRESS_UPDATE_INTERVAL_MS) return;
+        tracker.lastUpdateSentAt = now;
+        const timePerOp =
+          progress.iterationsCompleted > 0 ? progress.elapsedTimeMs / progress.iterationsCompleted : 0;
+        postMessage({
+          type: "progress",
+          runId: progress.task,
+          measurementFraction: progress.iterationsCompleted / progress.iterationsTotal,
+          iterationsCompleted: progress.iterationsCompleted,
+          totalIterations: progress.iterationsTotal,
+          elapsedTime: now - tracker.startedAt,
+          measuredTime: progress.elapsedTimeMs,
+          timePerOp,
+          phase: "measurement",
+        });
+        return;
+      }
+
+      // auto mode: fold per-phase counters into task-wide totals; a counter that
+      // moved backward means benchmate reset it on a phase change
+      if (tracker.phase !== progress.phase || progress.elapsedTimeMs < tracker.phaseMs) {
+        tracker.finishedPhasesMs += tracker.phaseMs;
+        tracker.finishedPhasesOps += tracker.phaseOps;
+        tracker.phase = progress.phase;
+      }
+      tracker.phaseMs = progress.elapsedTimeMs;
+      tracker.phaseOps = progress.operationsCompleted;
+
+      if (now - tracker.lastUpdateSentAt < PROGRESS_UPDATE_INTERVAL_MS) return;
+      tracker.lastUpdateSentAt = now;
+
+      const measuredTime = tracker.finishedPhasesMs + progress.elapsedTimeMs;
+      const totalOps = tracker.finishedPhasesOps + progress.operationsCompleted;
+      // marginal rate since the last forwarded update: cumulative averaging would
+      // drag warmup samples into the measurement phase and never flatten
+      const deltaMs = measuredTime - tracker.lastSentMeasuredMs;
+      const deltaOps = totalOps - tracker.lastSentOps;
+      let timePerOp = 0;
+      if (deltaOps > 0 && deltaMs > 0) timePerOp = deltaMs / deltaOps;
+      else if (totalOps > 0) timePerOp = measuredTime / totalOps;
+      tracker.lastSentMeasuredMs = measuredTime;
+      tracker.lastSentOps = totalOps;
+
+      // warmup and pilot have no known final count; only measurement reports a
+      // determinate fraction from the locked physical block plan
+      const measurementFraction =
+        progress.phase === "measurement" && progress.physicalBlocksPlanned ?
+          progress.physicalBlocksCompleted / progress.physicalBlocksPlanned
+        : null;
+
+      postMessage({
+        type: "progress",
+        runId: progress.task,
+        measurementFraction,
+        iterationsCompleted: totalOps,
+        totalIterations: 0,
+        elapsedTime: now - tracker.startedAt,
+        measuredTime,
+        timePerOp,
+        phase: progress.phase,
+      });
     });
 
     runner.on("setup", ({ task: runId }) => {
@@ -123,10 +220,15 @@ const handleStartRuns = async (
     runner.on("taskComplete", (result) => {
       // final console flush for task
       flushLogs(true);
-      postMessage({ type: "taskComplete", runId: result.name });
+      const tracker = trackers.get(result.name);
+      postMessage({
+        type: "taskComplete",
+        runId: result.name,
+        elapsedTime: tracker ? Date.now() - tracker.startedAt : 0,
+      });
     });
 
-    // add tasks
+    // load benchmark modules
     for (const run of runs) {
       const blob = new Blob([run.processedCode], { type: "text/javascript" });
       const blobUrl = URL.createObjectURL(blob);
@@ -140,19 +242,14 @@ const handleStartRuns = async (
       runner.add(run.runId, benchmarkFn as () => void);
     }
 
-    // run benchmark
-    const results = await runner.run();
+    // run benchmark and post the complete result without a browser-only shape
+    const result = await runner.run();
     flushLogs(true);
-
-    // send results
-    for (const run of runs) {
-      const runResults = results.filter((r) => r.name === run.runId);
-      postMessage({
-        type: "result",
-        runId: run.runId,
-        result: runResults,
-      });
-    }
+    postMessage({
+      type: "complete",
+      result,
+      crossOriginIsolated: self.crossOriginIsolated,
+    });
   } catch (error) {
     // send errors
     for (const run of runs) {

@@ -32,8 +32,9 @@ interface ImplementationRun {
 }
 
 const calculateOpsPerSecond = (run: BenchmarkRun): number => {
-  if (run.status === "completed" && run.result?.stats.opsPerSecond.average) {
-    return run.result.stats.opsPerSecond.average;
+  const completedAverage = run.result?.stats.operationsPerSecond.average;
+  if (run.status === "completed" && completedAverage) {
+    return completedAverage;
   }
   if (run.status === "running" && run.elapsedTime > 0 && run.completedIterations > 0) {
     return (run.completedIterations / run.elapsedTime) * 1000;
@@ -41,8 +42,17 @@ const calculateOpsPerSecond = (run: BenchmarkRun): number => {
   return 0;
 };
 
+// ranking is only defined across complete evidence; benchmate's host guide forbids
+// a fastest badge when any member's result is inconclusive
+export const isRankingEligible = (runs: ImplementationRun[]): boolean => {
+  const completed = runs.filter((item) => item.run?.status === "completed" && item.run.result);
+  if (completed.length === 0) return false;
+  return completed.every((item) => item.run?.result?.evidence.status === "complete");
+};
+
 const calculateRunMetrics = (runs: ImplementationRun[]): Map<string, RunMetrics> => {
   const metrics = new Map<string, RunMetrics>();
+  const rankable = isRankingEligible(runs);
 
   let best = 0;
   for (const item of runs) {
@@ -51,12 +61,13 @@ const calculateRunMetrics = (runs: ImplementationRun[]): Map<string, RunMetrics>
   }
 
   for (const item of runs) {
-    if (item.run?.status === "completed" && item.run.result?.stats.opsPerSecond.average) {
-      const opsPerSecond = item.run.result.stats.opsPerSecond.average;
+    const completedAverage = item.run?.result?.stats.operationsPerSecond.average;
+    if (item.run?.status === "completed" && completedAverage) {
+      const opsPerSecond = completedAverage;
       metrics.set(item.implementation.id, {
         opsPerSecond,
         percentageDiff: ((best - opsPerSecond) / best) * 100,
-        isBest: opsPerSecond === best,
+        isBest: rankable && opsPerSecond === best,
       });
     } else if (item.run?.status === "running") {
       const currentOps = calculateOpsPerSecond(item.run);
@@ -64,7 +75,7 @@ const calculateRunMetrics = (runs: ImplementationRun[]): Map<string, RunMetrics>
         metrics.set(item.implementation.id, {
           opsPerSecond: currentOps,
           percentageDiff: ((best - currentOps) / best) * 100,
-          isBest: currentOps === best,
+          isBest: false,
         });
       }
     }

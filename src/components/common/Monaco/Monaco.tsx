@@ -34,6 +34,7 @@ export interface MonacoProps {
   defaultValue?: string;
   value?: string;
   language?: string;
+  modelPathPrefix?: string;
   options?: editor.IStandaloneEditorConstructionOptions;
   className?: string;
   tabs?: MonacoTab[];
@@ -54,6 +55,7 @@ export const Monaco = ({
   className,
   tabs,
   extraLibs,
+  modelPathPrefix,
   theme = "light",
   onChangeTab,
   onCloseTab,
@@ -67,6 +69,8 @@ export const Monaco = ({
 }: MonacoProps) => {
   const monacoHelper = useMonaco();
   const activeFile = tabs?.find((f) => f.active);
+  const activeFileName = activeFile?.name ?? "main.ts";
+  const activeFilePath = modelPathPrefix ? `${modelPathPrefix}/${activeFileName}` : activeFileName;
 
   const onDTSChangeRef = useRef<((value: string) => void) | null>(null);
   onDTSChangeRef.current = onDTSChange ?? null;
@@ -213,10 +217,10 @@ export const Monaco = ({
       <div className="h-full">
         <Editor
           {...props}
-          key={activeFile?.name ?? "main.ts"}
+          key={activeFileName}
           beforeMount={handleBeforeMount}
           className={cn("nodrag h-full", className)}
-          path={activeFile?.name ?? "main.ts"}
+          path={activeFilePath}
           theme="custom"
           onMount={handleMount}
         />

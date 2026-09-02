@@ -1,7 +1,8 @@
 import { useMemo } from "react";
+import type { ClockProfile, MeasurementPhase, PairedComparison } from "benchmate";
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
-import { BenchmarkResult } from "@/services/benchmark/types";
+import { BenchmarkPhase, BenchmarkResult } from "@/services/benchmark/types";
 
 export type BenchmarkStatus = "cancelled" | "completed" | "failed" | "running" | "warmup";
 
@@ -12,10 +13,12 @@ export interface BenchmarkRun {
   warmupStartedAt: number | null;
   warmupEndedAt: number | null;
   status: BenchmarkStatus;
+  phase?: BenchmarkPhase | null;
   filename: string;
   originalCode: string;
   processedCode: string;
-  progress: number;
+  // null while warmup/pilot collect evidence (indeterminate); measurement reports 0-100
+  progress: number | null;
   elapsedTime: number;
   completedIterations: number;
   totalIterations: number;
@@ -28,6 +31,7 @@ export interface ChartDataPoint {
   time: number;
   timePerOp: number;
   iterations: number;
+  phase?: MeasurementPhase | null;
 }
 
 export interface ConsoleLog {
@@ -37,19 +41,27 @@ export interface ConsoleLog {
   count: number;
 }
 
-export interface BenchmarkState {
-  // current run
-  currentRunId: string | null;
+export interface RunInfo {
+  clock: ClockProfile;
+  durationMs: number;
+  comparisons: readonly PairedComparison[];
+  crossOriginIsolated: boolean;
+}
 
+export interface BenchmarkState {
   // implementation runs
   runs: Record<string, BenchmarkRun[]>; // { [implementationId]: BenchmarkRun }
   addRuns: (run: BenchmarkRun[]) => void;
   updateRun: (id: string, data: Partial<Omit<BenchmarkRun, "id">>) => void;
   removeRun: (id: string) => void;
 
+  runInfoByRunId: Record<string, RunInfo>;
+  setRunInfo: (runIds: string[], info: RunInfo) => void;
+
   // chart data
   chartData: Record<string, ChartDataPoint[]>; // { [runId]: ChartDataPoint[] }
   addChartPoint: (runId: string, point: ChartDataPoint) => void;
+  setChartData: (runId: string, points: ChartDataPoint[]) => void;
   clearChartData: (runId: string) => void;
 
   // console logs
@@ -97,6 +109,16 @@ export const useBenchmarkStore = create<BenchmarkState>()(
         runs: Object.fromEntries(Object.entries(state.runs).filter(([key]) => key !== id)),
       })),
 
+    // run-level info
+    runInfoByRunId: {},
+    setRunInfo: (runIds, info) =>
+      set((state) => ({
+        runInfoByRunId: {
+          ...state.runInfoByRunId,
+          ...Object.fromEntries(runIds.map((runId) => [runId, info])),
+        },
+      })),
+
     // chart data
     chartData: {},
     addChartPoint: (runId, point) =>
@@ -104,6 +126,13 @@ export const useBenchmarkStore = create<BenchmarkState>()(
         chartData: {
           ...state.chartData,
           [runId]: [...(state.chartData[runId] || []), point],
+        },
+      })),
+    setChartData: (runId, points) =>
+      set((state) => ({
+        chartData: {
+          ...state.chartData,
+          [runId]: points,
         },
       })),
     clearChartData: (runId) =>

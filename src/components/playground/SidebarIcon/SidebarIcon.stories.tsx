@@ -1,4 +1,4 @@
-import type { Meta, StoryObj } from "@storybook/react";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Search } from "lucide-react";
 import { SidebarIcon } from "./SidebarIcon";
 

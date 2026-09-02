@@ -1,4 +1,5 @@
-import type { Meta, StoryObj } from "@storybook/react";
+import { createBenchmarkResult } from "@/testing/benchmark-fixtures";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { RunTab } from "./RunTab";
 
 const meta = {
@@ -62,28 +63,25 @@ export const Completed: Story = {
       filename: "test.js",
       originalCode: "function test() {}",
       processedCode: "function test() {}",
-      result: {
-        name: "test",
-        stats: {
-          samples: 1000,
-          batches: 10,
-          time: {
-            total: 10_000,
-            average: 10,
-            min: 8,
-            max: 15,
-            percentile50: 10,
-            percentile90: 13,
-            percentile95: 14,
-          },
-          opsPerSecond: {
-            average: 100_000,
-            min: 66_666,
-            max: 125_000,
-            margin: 0.5,
-          },
+      result: createBenchmarkResult("test", {
+        operations: 1000,
+        blocks: 10,
+        elapsedMs: 10_000,
+        timePerOperationMs: {
+          average: 10,
+          median: 10,
+          min: 8,
+          max: 15,
+          percentile50: 10,
+          percentile90: 13,
+          percentile95: 14,
         },
-      },
+        operationsPerSecond: {
+          average: 100_000,
+          min: 66_666,
+          max: 125_000,
+        },
+      }),
     },
     chartData: mockChartData,
     clearChartData: () => {},

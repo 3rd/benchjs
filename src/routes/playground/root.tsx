@@ -3,13 +3,19 @@ import { Route } from ".react-router/types/src/routes/playground/+types/root";
 import { Share2Icon } from "lucide-react";
 import { Link } from "react-router";
 import { BenchmarkRun, useBenchmarkStore } from "@/stores/benchmarkStore";
-import { Implementation, usePersistentStore } from "@/stores/persistentStore";
+import {
+  flushDocumentSaves,
+  getCurrentDocument,
+  Implementation,
+  usePersistentStore,
+} from "@/stores/persistentStore";
 import { useMonacoTabs } from "@/hooks/useMonacoTabs";
 import { CodeView } from "@/routes/playground/views/code/index";
 import { CompareView } from "@/routes/playground/views/compare";
 import { SettingsView } from "@/routes/playground/views/settings";
 import { DependencyService } from "@/services/dependencies/DependencyService";
 import { Header } from "@/components/layout/Header";
+import { DocumentSwitcher } from "@/components/playground/DocumentSwitcher";
 import { ShareDialog } from "@/components/playground/ShareDialog";
 import { Sidebar, SidebarTab } from "@/components/playground/Sidebar";
 import { Button } from "@/components/ui/button";
@@ -34,8 +40,10 @@ export function meta({}: Route.MetaArgs) {
 
 export default function EditorRoute() {
   const store = usePersistentStore();
-  const monacoTabs = useMonacoTabs(store.implementations, {
-    initialActiveTabId: store.activeTabId,
+  const currentDocument = getCurrentDocument(store);
+  const monacoTabs = useMonacoTabs(currentDocument.implementations, {
+    documentId: currentDocument.id,
+    initialActiveTabId: currentDocument.activeTabId,
     onTabChange: (tabId: string | null) => {
       store.setActiveTabId(tabId);
     },
@@ -44,9 +52,11 @@ export default function EditorRoute() {
   const [shareData, setShareData] = useState<ShareDialogPayload | null>(null);
 
   const handleShare = () => {
+    flushDocumentSaves();
     const shareUrl = `${window.location.origin}${window.location.pathname}${window.location.hash}`;
+    const sharedDocument = getCurrentDocument(usePersistentStore.getState());
     setShareData({
-      implementations: usePersistentStore.getState().implementations,
+      implementations: sharedDocument.implementations,
       runs: useBenchmarkStore.getState().runs,
       shareUrl,
     });
@@ -54,15 +64,26 @@ export default function EditorRoute() {
 
   const dependencyService = useRef(new DependencyService());
   useEffect(() => {
-    for (const library of store.libraries) {
+    for (const library of currentDocument.libraries) {
       dependencyService.current.addLibrary({ name: library.name });
     }
-  }, [store.libraries]);
+  }, [currentDocument.libraries]);
 
   return (
     <div className="flex flex-col h-screen">
       <Header
         className="static"
+        postLogoElement={
+          <DocumentSwitcher
+            currentDocumentId={store.currentDocumentId}
+            currentTitle={currentDocument.title}
+            documents={store.documents}
+            onCreate={store.createDocument}
+            onDelete={store.removeDocument}
+            onRename={store.renameDocument}
+            onSelect={store.setCurrentDocumentId}
+          />
+        }
         customNav={
           <Button className="gap-2" variant="outline" onClick={handleShare}>
             <Share2Icon className="w-4 h-4" />
@@ -75,7 +96,11 @@ export default function EditorRoute() {
         <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
         <div className="flex overflow-auto flex-col flex-1 h-full">
           {activeTab === "code" && (
-            <CodeView dependencyService={dependencyService.current} monacoTabs={monacoTabs} />
+            <CodeView
+              dependencyService={dependencyService.current}
+              documentId={currentDocument.id}
+              monacoTabs={monacoTabs}
+            />
           )}
           {activeTab === "compare" && <CompareView />}
           {activeTab === "settings" && <SettingsView dependencyService={dependencyService.current} />}

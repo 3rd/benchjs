@@ -17,8 +17,8 @@ export const useUserStore = create<UserPreferences>()(
   persist(
     (set) => ({
       codeViewLayout:
-        typeof window === "undefined" ? "vertical" : (
-          (window.innerWidth >= VERTICAL_LAYOUT_MIN_WIDTH && "vertical") || "horizontal"
+        typeof window === "undefined" ? "horizontal" : (
+          (window.innerWidth >= VERTICAL_LAYOUT_MIN_WIDTH && "horizontal") || "vertical"
         ),
       // default to light theme
       theme: "light",

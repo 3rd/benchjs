@@ -82,7 +82,7 @@ export const MonacoTab = ({
           "group relative border-r border-border cursor-pointer min-w-[120px]",
           tab.active ? "bg-background" : "bg-muted hover:bg-accent",
           tab.active &&
-            "before:absolute before:top-0 before:left-0 before:right-0 before:h-[2px] before:bg-yellow-500",
+            "before:absolute before:top-0 before:left-0 before:right-0 before:h-[2px] before:bg-brand",
         )}
         style={style}
         onClick={handleClick}

@@ -75,7 +75,7 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
       <div
         className={cn(
           "flex items-center h-6 px-2 hover:bg-accent cursor-pointer rounded group relative",
-          isActive && "bg-blue-100 dark:bg-zinc-300/20",
+          isActive && "bg-accent",
         )}
         style={{ paddingLeft: `${(level + 1) * 10}px` }}
         onContextMenu={(e) => {
@@ -88,8 +88,8 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
         {/* icon */}
         <FileIcon
           className={cn(
-            "mr-1.5 ml-0.5 w-3.5 h-3.5 shrink-0",
-            isActive ? "text-blue-700 dark:text-yellow-500" : "text-blue-600 dark:text-yellow-500",
+            "mr-1.5 ml-0.5 w-3.5 h-3.5 shrink-0 text-muted-foreground",
+            isActive && "text-foreground",
           )}
         />
 
@@ -135,10 +135,7 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
             >
               {/* name */}
               <span
-                className={cn(
-                  "truncate flex-1 text-sm text-left",
-                  isActive && "text-blue-900 dark:text-yellow-500 font-medium",
-                )}
+                className={cn("truncate flex-1 text-sm text-left", isActive && "font-medium")}
               >
                 {item.name}
               </span>
@@ -217,8 +214,8 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
           {/* icon */}
           <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 transition-transform", isOpen && "rotate-90")} />
           {isOpen ?
-            <FolderOpen className="mr-1.5 w-3.5 h-3.5 text-blue-600 dark:text-yellow-500 shrink-0" />
-          : <FolderClosed className="mr-1.5 w-3.5 h-3.5 text-blue-600 dark:text-yellow-500 shrink-0" />}
+            <FolderOpen className="mr-1.5 w-3.5 h-3.5 text-muted-foreground shrink-0" />
+          : <FolderClosed className="mr-1.5 w-3.5 h-3.5 text-muted-foreground shrink-0" />}
 
           {/* name */}
           <span className="flex-1 text-sm truncate">{item.name}</span>
@@ -243,7 +240,7 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
 
           {/* count badge */}
           {item.count && (
-            <span className="px-1 ml-1.5 text-xs text-blue-800 bg-blue-100 rounded-sm dark:text-yellow-500 dark:bg-zinc-300">
+            <span className="py-px px-1 ml-1.5 text-xs rounded-sm bg-accent text-muted-foreground">
               {item.count}
             </span>
           )}

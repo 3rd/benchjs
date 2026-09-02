@@ -10,7 +10,7 @@ export const transform = async (code: string, filename?: string, plugins: Plugin
       //
       ...plugins,
     ],
-    presets: [["typescript", { allExtensions: true, isTSX: true }]],
+    presets: ["typescript"],
     generatorOpts: {
       comments: false,
       retainFunctionParens: true,

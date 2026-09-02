@@ -1,4 +1,5 @@
-import type { Meta, StoryObj } from "@storybook/react";
+import { createBenchmarkResult } from "@/testing/benchmark-fixtures";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { BenchmarkStatus } from "@/stores/benchmarkStore";
 import { ShareDialog } from "./ShareDialog";
 
@@ -25,28 +26,10 @@ const createBenchmarkRun = (id: string, implId: string, filename: string, ops: n
   error: null,
   completedIterations: 1000,
   totalIterations: 1000,
-  result: {
-    name: filename,
-    stats: {
-      samples: 100,
-      batches: 10,
-      time: {
-        total: 1000,
-        min: 900,
-        max: 1100,
-        average: 1000,
-        percentile50: 1000,
-        percentile90: 1050,
-        percentile95: 1075,
-      },
-      opsPerSecond: {
-        average: ops,
-        max: ops * 1.1,
-        min: ops * 0.9,
-        margin: 0.01,
-      },
-    },
-  },
+  result: createBenchmarkResult(filename, {
+    operations: 100,
+    operationsPerSecond: { average: ops, max: ops * 1.1, min: ops * 0.9 },
+  }),
 });
 
 const mockRuns = {

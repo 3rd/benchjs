@@ -22,3 +22,7 @@ export const formatCountShort = (value: number): string => {
   if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
   return value.toString();
 };
+
+export const formatOps = (value: number | null): string => {
+  return value === null ? "-" : formatCount(Math.round(value));
+};

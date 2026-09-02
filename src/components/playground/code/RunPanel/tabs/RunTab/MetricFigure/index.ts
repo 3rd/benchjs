@@ -1,0 +1,1 @@
+export { MetricFigure } from "./MetricFigure";

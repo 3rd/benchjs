@@ -3,3 +3,7 @@ export const features = {
     enabled: false,
   },
 };
+
+export const benchmark = {
+  fixedTimeMs: 3000,
+};

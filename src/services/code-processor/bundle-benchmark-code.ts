@@ -13,7 +13,7 @@ const esbuildPromise =
 
 // transform import sources to library URLs
 const buildImportTransformPlugin = (libraries: Library[]): PluginItem => {
-  const plugin: PluginItem = {
+  const plugin: PluginItem = () => ({
     name: "import-transform",
     visitor: {
       ImportDeclaration(path) {
@@ -25,12 +25,12 @@ const buildImportTransformPlugin = (libraries: Library[]): PluginItem => {
         }
       },
     },
-  };
+  });
   return plugin;
 };
 
 // process exported run function
-export const runFunctionProcessorPlugin: PluginItem = {
+export const runFunctionProcessorPlugin: PluginItem = () => ({
   name: "run-function-processor",
   visitor: {
     // export function run() { ... }
@@ -65,7 +65,7 @@ export const runFunctionProcessorPlugin: PluginItem = {
             t.identifier("run"),
             init.params,
             body,
-            init.generator,
+            init.generator ?? false,
             init.async,
           );
 
@@ -96,7 +96,7 @@ export const runFunctionProcessorPlugin: PluginItem = {
           t.identifier("run"),
           decl.params,
           body,
-          decl.generator,
+          decl.generator ?? false,
           decl.async,
         );
 
@@ -106,10 +106,30 @@ export const runFunctionProcessorPlugin: PluginItem = {
       }
     },
   },
-};
+});
+
+// wrap discarded expression statements in the benchmark function body with
+// blackhole so the JIT cannot dead-code-eliminate the measured work; only the
+// task function's direct body is transformed (nested scopes, directives, and
+// returns are left alone), matching the benchmate host-guide transform rules
+export const blackholeProtectPlugin: PluginItem = () => ({
+  name: "blackhole-protect",
+  visitor: {
+    ExportDefaultDeclaration(path) {
+      const declaration = path.node.declaration;
+      if (!t.isFunctionDeclaration(declaration)) return;
+      for (const statement of declaration.body.body) {
+        if (!t.isExpressionStatement(statement)) continue;
+        const expression = statement.expression;
+        if (t.isAssignmentExpression(expression) || t.isUpdateExpression(expression)) continue;
+        statement.expression = t.callExpression(t.identifier("__benchmateBlackhole"), [expression]);
+      }
+    },
+  },
+});
 
 // strip other exports
-export const stripExportsPlugin: PluginItem = {
+export const stripExportsPlugin: PluginItem = () => ({
   name: "strip-exports",
   visitor: {
     ExportNamedDeclaration(path) {
@@ -129,7 +149,7 @@ export const stripExportsPlugin: PluginItem = {
       }
     },
   },
-};
+});
 
 export const bundleBenchmarkCode = async (
   userCode: string,
@@ -139,12 +159,15 @@ export const bundleBenchmarkCode = async (
 ) => {
   await esbuildPromise;
 
-  // babel transforms
-  const transformedCode = await transform(`${setupCode}\n\n${userCode}`, filename, [
+  // babel transforms; blackhole protection runs as a second pass so it sees the
+  // normalized `export default function run()` produced by the first pass
+  const normalizedCode = await transform(`${setupCode}\n\n${userCode}`, filename, [
     buildImportTransformPlugin(libraries),
     runFunctionProcessorPlugin,
     stripExportsPlugin,
   ]);
+  const protectedCode = await transform(normalizedCode, filename, [blackholeProtectPlugin]);
+  const transformedCode = `const __benchmateBlackhole = globalThis.__benchmateBlackhole ?? ((value) => value);\n${protectedCode}`;
 
   // bundle
   const entryUrl = `${location.protocol}//${location.host}/main.ts`;

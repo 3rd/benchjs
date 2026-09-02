@@ -3,6 +3,7 @@ import { Implementation } from "@/stores/persistentStore";
 import { MonacoTab } from "@/components/common/MonacoTab";
 
 interface UseMonacoTabsOptions {
+  documentId?: string;
   initialActiveTabId?: string | null;
   onTabChange?: (tabId: string | null) => void;
   onTabClose?: (tabId: string) => void;
@@ -10,18 +11,32 @@ interface UseMonacoTabsOptions {
 
 const defaultTabsIds = new Set(["README.md", "setup.ts"]);
 
+const createInitialTabs = (implementations: Implementation[], activeTabId?: string | null) => {
+  const readmeTab: MonacoTab = {
+    id: "README.md",
+    name: "README.md",
+    active: true,
+  };
+  if (!activeTabId || activeTabId === readmeTab.id) return [readmeTab];
+
+  if (activeTabId === "setup.ts") {
+    return [
+      { ...readmeTab, active: false },
+      { id: "setup.ts", name: "setup.ts", active: true },
+    ];
+  }
+
+  const implementation = implementations.find((item) => item.id === activeTabId);
+  if (!implementation) return [readmeTab];
+
+  return [
+    { ...readmeTab, active: false },
+    { id: implementation.id, name: implementation.filename, active: true },
+  ];
+};
+
 export const useMonacoTabs = (implementations: Implementation[], options?: UseMonacoTabsOptions) => {
-  const [tabs, setTabs] = useState<MonacoTab[]>(() => {
-    const initialTabs = [{ id: "README.md", name: "README.md", active: true }];
-    if (options?.initialActiveTabId) {
-      const item = implementations.find((i) => i.id === options.initialActiveTabId);
-      if (item) {
-        initialTabs[0].active = false;
-        initialTabs.push({ id: item.id, name: item.filename, active: true });
-      }
-    }
-    return initialTabs;
-  });
+  const [tabs, setTabs] = useState<MonacoTab[]>(() => createInitialTabs(implementations, options?.initialActiveTabId));
 
   const changeTab = useCallback(
     (tab: MonacoTab | string) => {
@@ -152,6 +167,10 @@ export const useMonacoTabs = (implementations: Implementation[], options?: UseMo
       return newTabs;
     });
   }, [implementations]);
+
+  useEffect(() => {
+    setTabs(createInitialTabs(implementations, options?.initialActiveTabId));
+  }, [options?.documentId]);
 
   const activeTabId = tabs.find((item) => item.active)?.id ?? null;
 

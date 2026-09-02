@@ -1,29 +1,11 @@
-import { BenchmarkOptions } from "benchmate";
+import { BenchEvents, BenchmarkOptions, BenchmarkRunResult, CallBenchmarkResult } from "benchmate";
 
 // benchmark types
-export type BenchmarkResult = {
-  name: string;
-  stats: {
-    samples: number;
-    batches: number;
-    time: {
-      total: number;
-      min: number;
-      max: number;
-      average: number;
-      percentile50: number;
-      percentile90: number;
-      percentile95: number;
-    };
-    opsPerSecond: {
-      average: number;
-      max: number;
-      min: number;
-      margin: number;
-    };
-    memory?: number;
-  };
-};
+export type BenchmarkPhase = BenchEvents["taskPhaseStart"]["phase"];
+export type EvidenceStatus = BenchEvents["taskEvidenceStatus"]["status"];
+
+// the complete per-task entry; the host guide forbids replacing it with a browser-only shape
+export type BenchmarkResult = CallBenchmarkResult;
 
 // worker messages
 export type MainToWorkerMessage = {
@@ -47,18 +29,25 @@ export type WorkerToMainMessage =
         count: number;
       }[];
     }
-  | { type: "error"; runId: string; error: string }
   | {
       type: "progress";
       runId: string;
       elapsedTime: number;
+      measuredTime: number;
+      timePerOp: number;
       iterationsCompleted: number;
-      progress: number;
       totalIterations: number;
+      // null while warmup/pilot collect evidence (no known final count); the
+      // measurement phase reports its locked physical block fraction
+      measurementFraction: number | null;
+      phase?: BenchmarkPhase;
     }
-  | { type: "result"; runId: string; result: BenchmarkResult[] }
+  | { type: "complete"; result: BenchmarkRunResult; crossOriginIsolated: boolean }
+  | { type: "error"; runId: string; error: string }
+  | { type: "evidenceStatus"; runId: string; status: EvidenceStatus; reasons: string[] }
+  | { type: "phase"; runId: string; phase: BenchmarkPhase }
   | { type: "setup"; runId: string }
-  | { type: "taskComplete"; runId: string }
+  | { type: "taskComplete"; runId: string; elapsedTime: number }
   | { type: "taskStart"; runId: string }
   | { type: "teardown"; runId: string }
   | { type: "warmupEnd"; runId: string }

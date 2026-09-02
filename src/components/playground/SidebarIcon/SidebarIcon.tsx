@@ -1,5 +1,5 @@
-import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export const SidebarIcon = ({
   icon: Icon,
@@ -14,34 +14,32 @@ export const SidebarIcon = ({
   count?: number;
   onClick?: () => void;
 }) => {
-  const [isHovered, setIsHovered] = useState(false);
-
   return (
-    <div className="relative">
-      <div
-        className={cn(
-          "flex items-center justify-center h-12 w-12 hover:bg-accent cursor-pointer relative",
-          isActive && "border-l-2 border-blue-600 dark:border-yellow-600",
-        )}
-        onClick={onClick}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-      >
-        {/* icon */}
-        <Icon className={cn("h-5 w-5", isActive && "text-blue-600 dark:text-yellow-500")} />
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            aria-label={tooltip}
+            className={cn(
+              "flex relative justify-center items-center w-12 h-12 hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
+              isActive && "border-l-2 border-brand",
+            )}
+            type="button"
+            onClick={onClick}
+          >
+            {/* icon */}
+            <Icon className={cn("h-5 w-5 text-muted-foreground", isActive && "text-foreground")} />
 
-        {/* badge */}
-        {count && (
-          <span className="absolute right-0.5 top-1 px-0.5 text-xs text-blue-800 bg-blue-100 rounded-sm">
-            {count}
-          </span>
-        )}
-      </div>
-      {isHovered && (
-        <div className="absolute top-1/2 left-full z-50 py-1 px-2 ml-2 text-xs bg-foreground text-background rounded -translate-y-1/2">
-          {tooltip}
-        </div>
-      )}
-    </div>
+            {/* badge */}
+            {count && (
+              <span className="absolute top-1 right-0.5 px-0.5 text-xs rounded-sm bg-accent text-muted-foreground">
+                {count}
+              </span>
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">{tooltip}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 };

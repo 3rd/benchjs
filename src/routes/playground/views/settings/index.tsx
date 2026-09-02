@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Trash2 } from "lucide-react";
 import { useDependenciesStore } from "@/stores/dependenciesStore";
-import { usePersistentStore } from "@/stores/persistentStore";
+import { getCurrentDocument, usePersistentStore } from "@/stores/persistentStore";
 import { cache } from "@/services/dependencies/cache";
 import { DependencyService } from "@/services/dependencies/DependencyService";
 import { searchNpmPackages } from "@/services/dependencies/npmSearch";
@@ -18,6 +18,7 @@ interface SettingsViewProps {
 
 export function SettingsView({ dependencyService }: SettingsViewProps) {
   const store = usePersistentStore();
+  const currentDocument = getCurrentDocument(store);
   const dependencies = useDependenciesStore();
   const [libraryName, setLibraryName] = useState("");
   const [cacheCount, setCacheCount] = useState(0);
@@ -43,7 +44,7 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
     const trimmedName = packageSpec.trim();
     const packageName = packageNameFromOption || getPackageNameFromSpec(trimmedName);
 
-    const libsToRemove = store.libraries.filter((lib) => {
+    const libsToRemove = currentDocument.libraries.filter((lib) => {
       const libPackageName = getPackageNameFromSpec(lib.name);
       return libPackageName === packageName;
     });
@@ -154,7 +155,7 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
 
   return (
     <div className="container py-8 px-4 mx-auto">
-      <h1 className="mb-8 text-3xl font-bold">Settings</h1>
+      <h1 className="mb-6 text-2xl font-semibold tracking-tight">Settings</h1>
 
       <AnimatePresence>
         <motion.div
@@ -201,13 +202,13 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {store.libraries.length === 0 ?
+                    {currentDocument.libraries.length === 0 ?
                       <TableRow>
                         <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                           No dependencies added yet. Add one above to get started.
                         </TableCell>
                       </TableRow>
-                    : store.libraries.map((lib) => {
+                    : currentDocument.libraries.map((lib) => {
                         const dependency = dependencies.dependencyMap[lib.name];
 
                         return (

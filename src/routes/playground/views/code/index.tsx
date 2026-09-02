@@ -4,7 +4,7 @@ import { editor as RawMonacoEditor } from "monaco-editor";
 import { nanoid } from "nanoid";
 import { ImperativePanelHandle } from "react-resizable-panels";
 import { useLatestRunForImplementation } from "@/stores/benchmarkStore";
-import { usePersistentStore } from "@/stores/persistentStore";
+import { getCurrentDocument, usePersistentStore } from "@/stores/persistentStore";
 import { useUserStore } from "@/stores/userStore";
 import { useMonacoTabs } from "@/hooks/useMonacoTabs";
 import { DEFAULT_IMPLEMENTATION } from "@/constants";
@@ -21,22 +21,24 @@ const MIN_SIDEBAR_WIDTH = 280;
 interface CodeViewProps {
   monacoTabs: ReturnType<typeof useMonacoTabs>;
   dependencyService: DependencyService;
+  documentId: string;
 }
 
-export const CodeView = ({ monacoTabs, dependencyService }: CodeViewProps) => {
+export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeViewProps) => {
   const store = usePersistentStore();
+  const currentDocument = getCurrentDocument(store);
   const { codeViewLayout: layout, setCodeViewLayout, theme } = useUserStore();
 
   const currentImplementation = useMemo(() => {
-    return store.implementations.find((item) => item.id === monacoTabs.activeTabId);
-  }, [monacoTabs.activeTabId, store]);
+    return currentDocument.implementations.find((item) => item.id === monacoTabs.activeTabId);
+  }, [currentDocument.implementations, monacoTabs.activeTabId]);
 
   const latestRun = useLatestRunForImplementation(currentImplementation?.id ?? "");
 
   const getFileContent = (id: string) => {
-    if (id === "README.md") return store.readmeContent;
-    if (id === "setup.ts") return store.setupCode;
-    return store.implementations.find((item) => item.id === id)?.content || "";
+    if (id === "README.md") return currentDocument.readmeContent;
+    if (id === "setup.ts") return currentDocument.setupCode;
+    return currentDocument.implementations.find((item) => item.id === id)?.content || "";
   };
 
   const root = useMemo<FileTreeItem>(() => {
@@ -49,14 +51,14 @@ export const CodeView = ({ monacoTabs, dependencyService }: CodeViewProps) => {
           id: "implementations",
           name: "implementations",
           type: "folder",
-          children: store.implementations.map((item) => ({
+          children: currentDocument.implementations.map((item) => ({
             id: item.id,
             name: item.filename,
             type: "file",
             actions: {
               onRename: (newName: string) => {
                 const trimmedName = newName.trim();
-                const isDuplicate = store.implementations.some(
+                const isDuplicate = currentDocument.implementations.some(
                   (otherItem) =>
                     otherItem.id !== item.id &&
                     otherItem.filename.toLowerCase() === trimmedName.toLowerCase(),
@@ -73,7 +75,7 @@ export const CodeView = ({ monacoTabs, dependencyService }: CodeViewProps) => {
               },
               onDuplicate: () => {
                 const id = nanoid();
-                const existingFilenames = new Set(store.implementations.map((i) => i.filename));
+                const existingFilenames = new Set(currentDocument.implementations.map((i) => i.filename));
 
                 // handle file extension
                 let baseName = item.filename;
@@ -104,9 +106,9 @@ export const CodeView = ({ monacoTabs, dependencyService }: CodeViewProps) => {
           actions: {
             onCreate: () => {
               const id = nanoid();
-              const existingFilenames = new Set(store.implementations.map((i) => i.filename));
-              let filename = `implementation-${store.implementations.length + 1}.ts`;
-              let i = store.implementations.length + 1;
+              const existingFilenames = new Set(currentDocument.implementations.map((i) => i.filename));
+              let filename = `implementation-${currentDocument.implementations.length + 1}.ts`;
+              let i = currentDocument.implementations.length + 1;
               while (existingFilenames.has(filename)) {
                 filename = `implementation-${i++}.ts`;
               }
@@ -131,21 +133,21 @@ export const CodeView = ({ monacoTabs, dependencyService }: CodeViewProps) => {
         },
       ],
     };
-  }, [monacoTabs, store]);
+  }, [currentDocument.implementations, monacoTabs, store]);
 
   const extraLibs = useMemo(() => {
     if (!currentImplementation) return [];
     return [
       {
         filename: "file:///setup.d.ts",
-        content: store.setupDTS,
+        content: currentDocument.setupDTS,
       },
     ];
-  }, [currentImplementation, store.setupDTS]);
+  }, [currentDocument.setupDTS, currentImplementation]);
 
   const handleFileContentChange = useCallback(
     (content: string | undefined) => {
-      if (!monacoTabs.activeTabId || !content) return;
+      if (!monacoTabs.activeTabId || content === undefined) return;
 
       if (monacoTabs.activeTabId === "setup.ts") {
         store.setSetupCode(content);
@@ -167,8 +169,8 @@ export const CodeView = ({ monacoTabs, dependencyService }: CodeViewProps) => {
 
   const handleRun = useCallback(() => {
     if (!currentImplementation) return;
-    benchmarkService.runBenchmark(store.setupCode, [currentImplementation]);
-  }, [currentImplementation, store]);
+    benchmarkService.runBenchmark(currentDocument.setupCode, [currentImplementation]);
+  }, [currentDocument.setupCode, currentImplementation]);
 
   const handleStop = useCallback(() => {
     if (!latestRun) return;
@@ -181,11 +183,11 @@ export const CodeView = ({ monacoTabs, dependencyService }: CodeViewProps) => {
   const handleEditorMount = useCallback(
     (editor: RawMonacoEditor.IStandaloneCodeEditor, monaco: MonacoEditor) => {
       dependencyService.mountEditor(editor, monaco);
-      for (const item of store.libraries) {
+      for (const item of currentDocument.libraries) {
         dependencyService.addLibrary(item);
       }
     },
-    [store.libraries, dependencyService],
+    [currentDocument.libraries, dependencyService],
   );
 
   const runPanelRef = useRef<ImperativePanelHandle>(null);
@@ -220,9 +222,9 @@ export const CodeView = ({ monacoTabs, dependencyService }: CodeViewProps) => {
         <ResizablePanelGroup className="h-full" direction={layout}>
           <ResizablePanel defaultSize={70} id="editor-panel">
             <Monaco
-              key={monacoTabs.activeTabId}
               extraLibs={extraLibs}
               language={monacoTabs.activeTabId?.endsWith(".md") ? "markdown" : "typescript"}
+              modelPathPrefix={documentId}
               tabs={monacoTabs.tabs}
               theme={theme}
               value={getFileContent(monacoTabs.activeTabId ?? "")}

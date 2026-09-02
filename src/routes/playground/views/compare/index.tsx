@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Download, Loader2, PlayIcon } from "lucide-react";
 import { useBenchmarkStore } from "@/stores/benchmarkStore";
-import { Implementation, usePersistentStore } from "@/stores/persistentStore";
+import { getCurrentDocument, Implementation, usePersistentStore } from "@/stores/persistentStore";
 import { benchmarkService } from "@/services/benchmark/benchmark-service";
 import { ExportModal } from "@/components/ExportModal";
 import { ComparisonChart } from "@/components/playground/compare/ComparisonChart/ComparisonChart";
@@ -23,15 +23,16 @@ export const CompareView = () => {
   const [exportData, setExportData] = useState("");
   const store = useBenchmarkStore();
   const persistentStore = usePersistentStore();
+  const currentDocument = getCurrentDocument(persistentStore);
 
   useEffect(() => {
     setImplementations((prev) =>
-      persistentStore.implementations.map((item) => ({
+      currentDocument.implementations.map((item) => ({
         ...item,
         selected: prev.some((curr) => curr.id === item.id),
       })),
     );
-  }, [persistentStore.implementations]);
+  }, [currentDocument.implementations]);
 
   const handleSelectAll = (checked: boolean) => {
     setImplementations(implementations.map((item) => ({ ...item, selected: checked })));
@@ -48,8 +49,8 @@ export const CompareView = () => {
     const itemsToRun = selectedItems.length > 0 ? selectedItems : implementations;
     if (itemsToRun.length === 0) return;
 
-    benchmarkService.runBenchmark(persistentStore.setupCode, itemsToRun);
-  }, [implementations, persistentStore.setupCode]);
+    benchmarkService.runBenchmark(currentDocument.setupCode, itemsToRun);
+  }, [currentDocument.setupCode, implementations]);
 
   const handleStop = useCallback((runId: string) => {
     benchmarkService.stopBenchmark(runId);
@@ -57,9 +58,9 @@ export const CompareView = () => {
 
   const handleRunSingle = useCallback(
     (item: Implementation) => {
-      benchmarkService.runBenchmark(persistentStore.setupCode, [item]);
+      benchmarkService.runBenchmark(currentDocument.setupCode, [item]);
     },
-    [persistentStore.setupCode],
+    [currentDocument.setupCode],
   );
 
   const handleExportResults = () => {
@@ -73,7 +74,7 @@ export const CompareView = () => {
         return {
           name: impl.filename,
           totalTime: run?.elapsedTime,
-          opsPerSec: run?.result?.stats.opsPerSecond.average,
+          opsPerSec: run?.result?.stats.operationsPerSecond.average,
         };
       });
 
@@ -93,7 +94,7 @@ export const CompareView = () => {
 
   return (
     <div className="container py-8 px-4 mx-auto">
-      <h1 className="mb-8 text-3xl font-bold">Compare Performance</h1>
+      <h1 className="mb-6 text-2xl font-semibold tracking-tight">Compare Performance</h1>
 
       <AnimatePresence>
         <motion.div

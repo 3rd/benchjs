@@ -60,14 +60,14 @@ export const RunPanelTabs = ({
         {!isVerticalCollapsed && (
           <>
             <TabsTrigger
-              className="data-[state=active]:bg-background data-[state=active]:border-t-2 data-[state=active]:border-t-yellow-500 px-4 rounded-none border-r border-border py-1.5 flex items-center gap-1 h-full"
+              className="data-[state=active]:bg-background border-t-2 border-t-transparent data-[state=active]:border-t-brand px-4 rounded-none border-r border-border py-1.5 flex items-center gap-1 h-full"
               value="run"
             >
               <FlameIcon className="w-4 h-4" />
               <span>Run</span>
             </TabsTrigger>
             <TabsTrigger
-              className="data-[state=active]:bg-background data-[state=active]:border-t-2 data-[state=active]:border-t-yellow-500 px-4 rounded-none border-r border-border py-1.5 flex items-center gap-1 h-full"
+              className="data-[state=active]:bg-background border-t-2 border-t-transparent data-[state=active]:border-t-brand px-4 rounded-none border-r border-border py-1.5 flex items-center gap-1 h-full"
               value="console"
             >
               <SquareChevronRightIcon className="w-4 h-4" />
@@ -151,6 +151,7 @@ export const RunPanel = ({
     })),
   );
   const consoleLogs = useBenchmarkStore((state) => (latestRun ? state.consoleLogs[latestRun.id] : null));
+  const runInfo = useBenchmarkStore((state) => (latestRun ? (state.runInfoByRunId[latestRun.id] ?? null) : null));
 
   const [internalActiveTab, setInternalActiveTab] = useState<RunPanelTab>("run");
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -186,18 +187,20 @@ export const RunPanel = ({
         onToggleCollapse={handleToggleCollapse}
       >
         <div className="overflow-y-auto h-full pb-2">
-          <TabsContent className="m-0" value="run">
+          {/* forceMount keeps the chart mounted across tab switches; remounting recharts is slow */}
+          <TabsContent className="m-0 data-[state=inactive]:hidden" forceMount value="run">
             <RunTab
               chartData={chartData}
               clearChartData={clearChartData}
               isRunning={isRunning}
               latestRun={latestRun}
+              runInfo={runInfo}
               onRun={handleRun}
               onStop={onStop}
             />
           </TabsContent>
 
-          <TabsContent className="m-0" value="console">
+          <TabsContent className="m-0 data-[state=inactive]:hidden" forceMount value="console">
             <ConsoleTab logs={consoleLogs} />
           </TabsContent>
         </div>

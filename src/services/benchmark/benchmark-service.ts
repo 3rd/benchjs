@@ -2,14 +2,14 @@ import { BenchmarkOptions } from "benchmate";
 import { nanoid } from "nanoid";
 import { serializeError } from "serialize-error";
 import { useBenchmarkStore } from "@/stores/benchmarkStore";
-import { Implementation } from "@/stores/persistentStore";
-import { usePersistentStore } from "@/stores/persistentStore";
-import { features } from "@/config";
+import { getCurrentDocument, Implementation, usePersistentStore } from "@/stores/persistentStore";
+import { benchmark, features } from "@/config";
 import { bundleBenchmarkCode } from "../code-processor/bundle-benchmark-code";
 import { BenchmarkResult, WorkerToMainMessage } from "./types";
 import BenchmarkWorker from "./worker?worker";
 
 let worker: Worker | null = null;
+let activeCleanup: (() => void) | null = null;
 
 const stopBenchmark = (runId: string): void => {
   const store = useBenchmarkStore.getState();
@@ -17,10 +17,12 @@ const stopBenchmark = (runId: string): void => {
     worker.terminate();
     worker = null;
   }
+  activeCleanup?.();
+  activeCleanup = null;
 
   store.updateRun(runId, {
     status: "cancelled",
-    progress: 0,
+    progress: null,
     error: null,
   });
 };
@@ -45,16 +47,43 @@ export const benchmarkService = {
   async runBenchmark(
     setupCode: string,
     implementations: Implementation[],
-    runnerOptions: Partial<BenchmarkOptions> = {},
+    runnerOptions?: BenchmarkOptions,
   ): Promise<BenchmarkResult[]> {
+    const libraries = getCurrentDocument(usePersistentStore.getState()).libraries;
     // eslint-disable-next-line no-async-promise-executor
     return new Promise(async (resolve, reject) => {
+      // background tabs throttle timers and distort measurements
+      const handleVisibilityChange = () => {
+        if (document.visibilityState !== "hidden") return;
+        const store = useBenchmarkStore.getState();
+        for (const implementationRuns of Object.values(store.runs)) {
+          const latest = implementationRuns[implementationRuns.length - 1];
+          if (latest && (latest.status === "running" || latest.status === "warmup")) {
+            store.addConsoleLog(latest.id, {
+              level: "warn",
+              message: "[benchmate] page hidden during the run; background throttling can distort results",
+              timestamp: Date.now(),
+              count: 1,
+            });
+          }
+        }
+      };
+      // the worker's benchmark loop starves its own timers (microtask-chained
+      // awaits), so the run clock ticks here; progress fractions come from the
+      // worker's real progress events
+      const taskWallStarts = new Map<string, number>();
+      const finishedTasks = new Set<string>();
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
+
+      const teardown = () => {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+        if (heartbeat) clearInterval(heartbeat);
+      };
+
       try {
         const store = useBenchmarkStore.getState();
         const totalIterations =
-          "iterations" in runnerOptions && typeof runnerOptions.iterations === "number" ?
-            runnerOptions.iterations
-          : 0;
+          runnerOptions && typeof runnerOptions.iterations === "number" ? runnerOptions.iterations : 0;
 
         // create runs
         const runs = implementations.map((implementation) => ({
@@ -67,7 +96,7 @@ export const benchmarkService = {
           filename: implementation.filename,
           originalCode: implementation.content,
           processedCode: "",
-          progress: 0,
+          progress: null,
           elapsedTime: 0,
           completedIterations: 0,
           totalIterations,
@@ -80,11 +109,10 @@ export const benchmarkService = {
         const processedRuns = await Promise.all(
           runs.map(async (run) => {
             try {
-              const persistentStore = usePersistentStore.getState();
               const processedCode = await bundleBenchmarkCode(
                 run.originalCode,
                 setupCode,
-                persistentStore.libraries,
+                libraries,
               );
               store.updateRun(run.id, {
                 processedCode,
@@ -125,14 +153,27 @@ export const benchmarkService = {
 
         // setup worker
         if (worker) worker.terminate();
+        activeCleanup?.();
+        activeCleanup = teardown;
         worker = new BenchmarkWorker();
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+        heartbeat = setInterval(() => {
+          const now = Date.now();
+          for (const [runId, startedAt] of taskWallStarts) {
+            if (finishedTasks.has(runId)) continue;
+            store.updateRun(runId, { elapsedTime: now - startedAt });
+          }
+        }, 200);
 
         worker.addEventListener("message", (event: MessageEvent<WorkerToMainMessage>) => {
           const message = event.data;
 
           switch (message.type) {
             case "warmupStart": {
-              store.updateRun(message.runId, { status: "warmup", warmupStartedAt: Date.now() });
+              store.updateRun(message.runId, {
+                status: "warmup",
+                warmupStartedAt: Date.now(),
+              });
               store.addConsoleLog(message.runId, {
                 level: "info",
                 message: "[benchmate] Warmup started",
@@ -142,7 +183,10 @@ export const benchmarkService = {
               break;
             }
             case "warmupEnd": {
-              store.updateRun(message.runId, { status: "running", warmupEndedAt: Date.now() });
+              store.updateRun(message.runId, {
+                status: "running",
+                warmupEndedAt: Date.now(),
+              });
               store.addConsoleLog(message.runId, {
                 level: "info",
                 message: "[benchmate] Warmup ended",
@@ -153,44 +197,90 @@ export const benchmarkService = {
             }
             case "progress": {
               store.updateRun(message.runId, {
-                progress: message.progress,
+                progress: message.measurementFraction === null ? null : message.measurementFraction * 100,
                 elapsedTime: message.elapsedTime,
                 completedIterations: message.iterationsCompleted,
                 totalIterations: message.totalIterations,
+                phase: message.phase ?? null,
               });
 
               // record chart data on every progress event
-              if (message.iterationsCompleted > 0) {
+              if (message.iterationsCompleted > 0 && message.timePerOp > 0) {
                 store.addChartPoint(message.runId, {
                   time: message.elapsedTime,
-                  timePerOp: message.elapsedTime / message.iterationsCompleted,
+                  timePerOp: message.timePerOp,
                   iterations: message.iterationsCompleted,
+                  phase: message.phase ?? null,
                 });
               }
               break;
             }
-            case "result": {
-              store.updateRun(message.runId, {
-                status: "completed",
-                progress: 100,
-                result: message.result[0],
-              });
+            case "complete": {
+              const runInfo = {
+                clock: message.result.clock,
+                durationMs: message.result.durationMs,
+                comparisons: message.result.comparisons,
+                crossOriginIsolated: message.crossOriginIsolated,
+              };
+              const runIds = message.result.entries
+                .filter((entry) => entry.taskType === "call")
+                .map((entry) => entry.name);
+              store.setRunInfo(runIds, runInfo);
+
+              const callEntries: BenchmarkResult[] = [];
+              for (const entry of message.result.entries) {
+                if (entry.taskType !== "call") continue;
+                callEntries.push(entry);
+                store.updateRun(entry.name, {
+                  status: "completed",
+                  progress: 100,
+                  result: entry,
+                });
+
+                // replace the coalesced live chart with the complete per-block evidence trace
+                const observations = entry.evidence.observations;
+                if (observations.length > 0) {
+                  const startedAt = observations[0].startedAtMs;
+                  let cumulativeOps = 0;
+                  const points = [];
+                  for (const observation of observations) {
+                    cumulativeOps += observation.operations;
+                    if (observation.operations <= 0 || observation.elapsedMs <= 0) continue;
+                    points.push({
+                      time: observation.startedAtMs - startedAt + observation.elapsedMs,
+                      timePerOp: observation.elapsedMs / observation.operations,
+                      iterations: cumulativeOps,
+                      phase: observation.phase,
+                    });
+                  }
+                  if (points.length > 0) store.setChartData(entry.name, points);
+                }
+                store.addConsoleLog(entry.name, {
+                  level: "info",
+                  message: `[benchmate] Run completed: ${entry.evidence.status}`,
+                  timestamp: Date.now(),
+                  count: 1,
+                });
+                if (features.memory.enabled) {
+                  (async () => {
+                    const memoryUsage = await getMemoryUsage();
+                    store.updateRun(entry.name, { memoryUsage });
+                  })();
+                }
+              }
+
+              teardown();
+              resolve(callEntries);
+              break;
+            }
+            case "evidenceStatus": {
+              const reasons = message.reasons.length > 0 ? `: ${message.reasons.join("; ")}` : "";
               store.addConsoleLog(message.runId, {
-                level: "info",
-                message: "[benchmate] Benchmark completed successfully",
+                level: message.status === "complete" ? "info" : "warn",
+                message: `[benchmate] Evidence ${message.status}${reasons}`,
                 timestamp: Date.now(),
                 count: 1,
               });
-              // TODO: change for multiple results
-              if (features.memory.enabled) {
-                (async () => {
-                  const memoryUsage = await getMemoryUsage();
-                  store.updateRun(message.runId, {
-                    memoryUsage,
-                  });
-                  resolve(message.result);
-                })();
-              }
               break;
             }
             case "error": {
@@ -204,6 +294,7 @@ export const benchmarkService = {
                 timestamp: Date.now(),
                 count: 1,
               });
+              teardown();
               reject(new Error(message.error));
               break;
             }
@@ -220,6 +311,7 @@ export const benchmarkService = {
               break;
             }
             case "taskStart": {
+              taskWallStarts.set(message.runId, Date.now());
               store.addConsoleLog(message.runId, {
                 message: `[benchmate] Task started: ${message.runId}`,
                 level: "info",
@@ -246,7 +338,22 @@ export const benchmarkService = {
               });
               break;
             }
+            case "phase": {
+              store.updateRun(message.runId, { phase: message.phase });
+              store.addConsoleLog(message.runId, {
+                message: `[benchmate] Phase: ${message.phase}`,
+                level: "info",
+                timestamp: Date.now(),
+                count: 1,
+              });
+              break;
+            }
             case "taskComplete": {
+              finishedTasks.add(message.runId);
+              store.updateRun(message.runId, {
+                elapsedTime: message.elapsedTime,
+                phase: null,
+              });
               store.addConsoleLog(message.runId, {
                 message: `[benchmate] Task completed: ${message.runId}`,
                 level: "info",
@@ -272,6 +379,7 @@ export const benchmarkService = {
           options: runnerOptions,
         });
       } catch (error) {
+        teardown();
         // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
         reject(error);
       }

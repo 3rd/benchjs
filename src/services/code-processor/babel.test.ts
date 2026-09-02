@@ -29,7 +29,7 @@ describe("babel", () => {
     `;
 
     const result = await transform(code, "main.ts", [
-      {
+      () => ({
         name: "custom-plugin",
         visitor: {
           TSTypeAliasDeclaration: {
@@ -38,7 +38,7 @@ describe("babel", () => {
             },
           },
         },
-      },
+      }),
     ]);
     expect(result).toBe(
       await format(`

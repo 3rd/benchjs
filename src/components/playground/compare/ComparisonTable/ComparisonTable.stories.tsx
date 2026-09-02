@@ -1,4 +1,5 @@
-import type { Meta, StoryObj } from "@storybook/react";
+import { createBenchmarkResult } from "@/testing/benchmark-fixtures";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { BenchmarkStatus } from "@/stores/benchmarkStore";
 import { ComparisonTable } from "./ComparisonTable";
 
@@ -44,29 +45,7 @@ const mockRuns = {
       warmupStartedAt: now + 100,
       warmupEndedAt: now + 200,
       error: null,
-      result: {
-        name: "implementation1.ts",
-        stats: {
-          samples: 100,
-          batches: 10,
-          time: {
-            total: 1000,
-            min: 900,
-            max: 1100,
-            average: 1000,
-            percentile50: 1000,
-            percentile90: 1050,
-            percentile95: 1075,
-          },
-          opsPerSecond: {
-            average: 1000,
-            max: 1100,
-            min: 900,
-            margin: 50,
-          },
-          memory: 1024,
-        },
-      },
+      result: createBenchmarkResult("implementation1.ts", { operations: 100 }),
     },
   ],
   "2": [
@@ -85,29 +64,13 @@ const mockRuns = {
       warmupStartedAt: now + 100,
       warmupEndedAt: null,
       error: null,
-      result: {
-        name: "implementation2.ts",
-        stats: {
-          samples: 50,
-          batches: 5,
-          time: {
-            total: 500,
-            min: 450,
-            max: 550,
-            average: 500,
-            percentile50: 500,
-            percentile90: 525,
-            percentile95: 537,
-          },
-          opsPerSecond: {
-            average: 500,
-            max: 550,
-            min: 450,
-            margin: 25,
-          },
-          memory: 512,
-        },
-      },
+      result: createBenchmarkResult("implementation2.ts", {
+        operations: 50,
+        blocks: 5,
+        elapsedMs: 500,
+        timePerOperationMs: { min: 450, max: 550, average: 500, median: 500, percentile50: 500, percentile90: 525, percentile95: 537 },
+        operationsPerSecond: { average: 500, max: 550, min: 450 },
+      }),
     },
   ],
 };

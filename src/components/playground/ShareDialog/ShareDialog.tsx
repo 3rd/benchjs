@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import { Check, Copy, Download } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 // import { SiFacebook, SiLinkedin, SiX } from "@icons-pack/react-simple-icons";
 import type { BenchmarkRun } from "@/stores/benchmarkStore";
 import type { Implementation } from "@/stores/persistentStore";
+import { CHART_COLORS, chartAxisTick, chartTooltipLabelStyle, chartTooltipStyle } from "@/lib/chart-style";
 import { formatCount, formatCountShort, formatDuration } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -42,7 +43,7 @@ export function ShareDialog({ implementations, runs, shareUrl, open, onOpenChang
       .map((item) => {
         const implRuns = runs[item.id] || [];
         const latestRun = implRuns[implRuns.length - 1];
-        const opsPerSecond = latestRun?.result?.stats?.opsPerSecond?.average || 0;
+        const opsPerSecond = latestRun?.result?.stats?.operationsPerSecond?.average || 0;
         return {
           name: item.filename,
           "Operations/sec": Number(opsPerSecond.toFixed(2)),
@@ -60,9 +61,9 @@ export function ShareDialog({ implementations, runs, shareUrl, open, onOpenChang
         const stats = latestRun?.result?.stats;
         return {
           name: item.filename,
-          opsPerSecond: stats?.opsPerSecond?.average || 0,
-          averageTime: stats?.time?.average || 0,
-          p95: stats?.time?.percentile95 || 0,
+          opsPerSecond: stats?.operationsPerSecond?.average || 0,
+          averageTime: stats?.timePerOperationMs?.average || 0,
+          p95: stats?.timePerOperationMs?.percentile95 || 0,
         };
       })
       .filter((d) => d.opsPerSecond > 0);
@@ -157,37 +158,50 @@ export function ShareDialog({ implementations, runs, shareUrl, open, onOpenChang
                     <div ref={imageRef} className="p-2 bg-white rounded-lg border dark:bg-zinc-900">
                       {/* chart */}
                       <ResponsiveContainer className="mx-auto" height={150} width={490}>
-                        <BarChart data={chartData} margin={{ top: 10, right: 10, left: 20, bottom: 0 }}>
-                          <CartesianGrid stroke="#eee" strokeDasharray="3 3" />
+                        <BarChart data={chartData} margin={{ top: 16, right: 10, left: 20, bottom: 0 }}>
+                          <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
                           <XAxis
+                            axisLine={{ stroke: CHART_COLORS.grid }}
                             dataKey="name"
                             height={30}
                             interval={0}
                             textAnchor="end"
-                            tick={{ fontSize: 12 }}
+                            tick={{ ...chartAxisTick, fontSize: 12 }}
+                            tickLine={false}
                           />
                           <YAxis
+                            axisLine={false}
                             label={{
                               value: "Ops/sec",
                               angle: -90,
                               position: "left",
-                              style: {
-                                textAnchor: "middle",
-                              },
+                              style: { textAnchor: "middle", fill: CHART_COLORS.label },
                             }}
-                            tick={{ fontSize: 12 }}
+                            tick={chartAxisTick}
                             tickFormatter={formatCountShort}
+                            tickLine={false}
                           />
                           <Tooltip
-                            contentStyle={{
-                              backgroundColor: "white",
-                              border: "1px solid #ccc",
-                              borderRadius: "4px",
-                              fontSize: "12px",
-                            }}
-                            formatter={(value: number) => `${formatCount(value)} ops/sec`}
+                            contentStyle={chartTooltipStyle}
+                            cursor={{ fill: CHART_COLORS.grid, fillOpacity: 0.4 }}
+                            formatter={(value) => `${formatCount(Number(value))} ops/sec`}
+                            labelStyle={chartTooltipLabelStyle}
                           />
-                          <Bar dataKey="Operations/sec" fill="#8884d8" radius={[4, 4, 0, 0]} />
+                          <Bar
+                            dataKey="Operations/sec"
+                            fill={CHART_COLORS.time}
+                            isAnimationActive={false}
+                            maxBarSize={72}
+                            radius={[4, 4, 0, 0]}
+                          >
+                            <LabelList
+                              dataKey="Operations/sec"
+                              fill={CHART_COLORS.label}
+                              fontSize={11}
+                              formatter={(value) => formatCountShort(Number(value))}
+                              position="top"
+                            />
+                          </Bar>
                         </BarChart>
                       </ResponsiveContainer>
 
