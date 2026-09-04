@@ -154,10 +154,12 @@ const handleStartRuns = async (
         tracker.lastUpdateSentAt = now;
         const timePerOp =
           progress.iterationsCompleted > 0 ? progress.elapsedTimeMs / progress.iterationsCompleted : 0;
+        const measurementFraction =
+          progress.iterationsTotal > 0 ? progress.iterationsCompleted / progress.iterationsTotal : null;
         postMessage({
           type: "progress",
           runId: progress.task,
-          measurementFraction: progress.iterationsCompleted / progress.iterationsTotal,
+          measurementFraction,
           elapsedTime: now - tracker.startedAt,
           measurementOperations: progress.iterationsCompleted,
           measurementElapsedMs: progress.elapsedTimeMs,

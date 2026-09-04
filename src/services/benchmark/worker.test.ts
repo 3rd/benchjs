@@ -131,3 +131,43 @@ it("reports measurement counters that exclude warmup and outlive the measurement
     },
   ]);
 });
+
+it("reports timer-limited fixed progress as indeterminate", async () => {
+  const progressHandlers: ((progress: BenchEvents["progress"]) => void)[] = [];
+  benchMocks.on.mockImplementation((event: string, handler: (progress: BenchEvents["progress"]) => void) => {
+    if (event === "progress") progressHandlers.push(handler);
+  });
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("data:text/javascript,export default () => 1");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  vi.spyOn(Date, "now").mockReturnValue(100);
+  const { listener, postMessage } = await startWorker();
+
+  await listener({
+    data: {
+      type: "start",
+      runs: [{ runId: "run-1", processedCode: "export default () => 1;" }],
+    },
+  });
+  const reportProgress = progressHandlers[0];
+  if (!reportProgress) throw new Error("Progress handler not registered");
+
+  reportProgress({
+    task: "run-1",
+    tasksCompleted: 0,
+    tasksTotal: 1,
+    iterationsCompleted: 0,
+    iterationsTotal: 0,
+    elapsedTimeMs: 0,
+  });
+
+  expect(postMessage).toHaveBeenCalledWith({
+    type: "progress",
+    runId: "run-1",
+    measurementFraction: null,
+    elapsedTime: 0,
+    measurementOperations: 0,
+    measurementElapsedMs: 0,
+    timePerOp: 0,
+    phase: "measurement",
+  });
+});

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import { horizontalListSortingStrategy, SortableContext } from "@dnd-kit/sortable";
-import Editor, { loader, Monaco as MonacoEditor, useMonaco } from "@monaco-editor/react";
+import Editor, { loader, Monaco as MonacoEditor } from "@monaco-editor/react";
 import type { editor, IDisposable, languages, Uri } from "monaco-editor";
 import type { CompletionEntry, CompletionInfo } from "typescript";
 import { cn } from "@/lib/utils";
@@ -230,20 +230,6 @@ const createTypeScriptCompletionProvider = (
   };
 };
 
-const transformToGlobalDeclarations = (dts: string) => {
-  return `declare global {
-${dts
-  .replace(/export declare/g, "declare")
-  .replace(/export interface/g, "interface")
-  .replace(/export type/g, "type")
-  .split("\n")
-  .map((line) => `  ${line}`)
-  .join("\n")}
-}
-
-export {};`;
-};
-
 export interface MonacoProps {
   height?: string;
   defaultValue?: string;
@@ -256,7 +242,6 @@ export interface MonacoProps {
   extraLibs?: { content: string; filename: string }[];
   theme?: keyof typeof themes;
   onChange?: (value: string | undefined) => void;
-  onDTSChange?: (value: string) => void;
   onChangeTab?: (tab: MonacoTab) => void;
   onCloseTab?: (tab: MonacoTab) => void;
   onCloseOtherTabs?: (tab: MonacoTab) => void;
@@ -279,7 +264,6 @@ export const Monaco = ({
   onCloseTabsToRight,
   onSetTabs,
   onChange,
-  onDTSChange,
   onMount,
   ...props
 }: MonacoProps) => {
@@ -294,7 +278,7 @@ export const Monaco = ({
     setIsLoaderConfigured(true);
   }, []);
 
-  const monacoHelper = useMonaco();
+  const [monacoHelper, setMonacoHelper] = useState<MonacoEditor | null>(null);
   const activeFile = tabs?.find((f) => f.active);
   const activeFileId = activeFile?.id ?? "main.ts";
   const activeFilePath = getModelPath(activeFileId, modelPathPrefix);
@@ -331,8 +315,6 @@ export const Monaco = ({
   retainedModelPathsRef.current = new Set(
     (tabs ?? []).map((tab) => `/${getModelPath(tab.id, modelPathPrefix)}`),
   );
-  const onDTSChangeRef = useRef<((value: string) => void) | null>(null);
-  onDTSChangeRef.current = onDTSChange ?? null;
   const mountRef = useRef<{
     options: editor.IStandaloneEditorConstructionOptions | undefined;
     onMount: MonacoProps["onMount"];
@@ -376,12 +358,26 @@ export const Monaco = ({
   useEffect(() => {
     if (!monacoHelper) return;
 
-    const registrations = (extraLibs ?? []).map((lib) =>
-      monacoHelper.languages.typescript.typescriptDefaults.addExtraLib(lib.content, lib.filename),
-    );
+    const registrations = (extraLibs ?? []).map((lib) => {
+      const resource = monacoHelper.Uri.parse(lib.filename);
+      const model = monacoHelper.editor.getModel(resource);
+      if (model && model.getValue() !== lib.content) {
+        model.setValue(lib.content);
+      }
+      return {
+        resource,
+        registration:
+          monacoHelper.languages.typescript.typescriptDefaults.addExtraLib(
+            lib.content,
+            lib.filename,
+          ),
+      };
+    });
 
     return () => {
-      for (const registration of registrations) {
+      for (const { registration, resource } of registrations) {
+        const model = monacoHelper.editor.getModel(resource);
+        if (model?.getValue()) model.setValue("");
         registration.dispose();
       }
     };
@@ -432,36 +428,8 @@ export const Monaco = ({
     });
   };
 
-  const handleChange = useCallback(
-    async (value: string | undefined) => {
-      onChange?.(value);
-
-      if (!onDTSChangeRef.current || !monacoHelper) return;
-
-      const model = editorRef.current?.getModel();
-      if (!model) return;
-      const modelVersion = model.getVersionId();
-      const modelUri = model.uri;
-      const isCurrentModelVersion = () =>
-        !model.isDisposed() &&
-        editorRef.current?.getModel() === model &&
-        model.getVersionId() === modelVersion;
-
-      const tsWorker = await monacoHelper.languages.typescript.getTypeScriptWorker();
-      if (!isCurrentModelVersion()) return;
-      const worker = await tsWorker(modelUri);
-      if (!isCurrentModelVersion()) return;
-      const outputs = await worker.getEmitOutput(modelUri.toString(), true, true);
-      if (!isCurrentModelVersion()) return;
-      const dts = outputs.outputFiles.find((file) => file.name.endsWith(".d.ts"))?.text;
-      if (!dts) return;
-
-      onDTSChangeRef.current?.(transformToGlobalDeclarations(dts));
-    },
-    [monacoHelper, onChange],
-  );
-
   const handleMount = useCallback((editor: editor.IStandaloneCodeEditor, monaco: MonacoEditor) => {
+    setMonacoHelper(monaco);
     editorRef.current = editor;
     modelChangeRegistrationRef.current?.dispose();
     modelChangeRegistrationRef.current = editor.onDidChangeModel((event) => {
@@ -543,7 +511,7 @@ export const Monaco = ({
             path={activeFilePath}
             saveViewState={false}
             theme={EDITOR_THEME_NAME}
-            onChange={handleChange}
+            onChange={onChange}
             onMount={handleMount}
           />
         )}

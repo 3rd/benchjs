@@ -13,12 +13,8 @@ interface BenchmarkSession {
   worker: Worker | null;
   cleanup: () => void;
   settled: boolean;
-  settle: (outcome: BenchmarkSessionOutcome) => void;
+  settle: (results: BenchmarkResult[]) => void;
 }
-
-type BenchmarkSessionOutcome =
-  | { type: "reject"; error: unknown }
-  | { type: "resolve"; results: BenchmarkResult[] };
 
 let activeSession: BenchmarkSession | null = null;
 
@@ -30,14 +26,13 @@ const createSession = (input: {
   runIds: Set<string>;
   cleanup: () => void;
   resolve: (results: BenchmarkResult[]) => void;
-  reject: (error: unknown) => void;
 }): BenchmarkSession => {
   const session: BenchmarkSession = {
     runIds: input.runIds,
     worker: null,
     cleanup: input.cleanup,
     settled: false,
-    settle: (outcome) => {
+    settle: (results) => {
       if (session.settled) return;
       session.settled = true;
       if (session.worker) {
@@ -47,8 +42,7 @@ const createSession = (input: {
       session.cleanup();
       if (activeSession === session) activeSession = null;
 
-      if (outcome.type === "resolve") input.resolve(outcome.results);
-      else input.reject(outcome.error);
+      input.resolve(results);
     },
   };
   return session;
@@ -56,7 +50,7 @@ const createSession = (input: {
 
 const cancelSession = (session: BenchmarkSession) => {
   useBenchmarkStore.getState().terminalizeRuns(session.runIds, "cancelled", null);
-  session.settle({ type: "resolve", results: [] });
+  session.settle([]);
 };
 
 const stopBenchmark = (runId: string): void => {
@@ -116,7 +110,7 @@ export const benchmarkService = {
   ): Promise<BenchmarkResult[]> {
     const libraries = getCurrentDocument(usePersistentStore.getState()).libraries;
     // eslint-disable-next-line no-async-promise-executor
-    return new Promise(async (resolve, reject) => {
+    return new Promise(async (resolve) => {
       // background tabs throttle timers and distort measurements
       const handleVisibilityChange = () => {
         if (document.visibilityState !== "hidden") return;
@@ -167,7 +161,6 @@ export const benchmarkService = {
         runIds: new Set(runs.map((run) => run.id)),
         cleanup: teardown,
         resolve,
-        reject,
       });
 
       if (activeSession) cancelSession(activeSession);
@@ -223,10 +216,7 @@ export const benchmarkService = {
               error: "Cancelled due to errors in other implementations",
             });
           }
-          session.settle({
-            type: "reject",
-            error: new Error("Failed to process one or more implementations"),
-          });
+          session.settle([]);
           return;
         }
 
@@ -342,7 +332,7 @@ export const benchmarkService = {
                 }
               }
 
-              session.settle({ type: "resolve", results: callEntries });
+              session.settle(callEntries);
               break;
             }
             case "evidenceStatus": {
@@ -363,10 +353,7 @@ export const benchmarkService = {
                 timestamp: Date.now(),
                 count: 1,
               });
-              session.settle({
-                type: "reject",
-                error: new Error(message.error),
-              });
+              session.settle([]);
               break;
             }
             case "consoleBatch": {
@@ -452,7 +439,7 @@ export const benchmarkService = {
       } catch (error) {
         if (!isActiveSession(session)) return;
         store.terminalizeRuns(session.runIds, "failed", serializeError(error).message || "Benchmark failed");
-        session.settle({ type: "reject", error });
+        session.settle([]);
       }
     });
   },

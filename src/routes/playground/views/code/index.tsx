@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Monaco as MonacoEditor } from "@monaco-editor/react";
 import { editor as RawMonacoEditor } from "monaco-editor";
 import { nanoid } from "nanoid";
@@ -8,6 +8,13 @@ import { useLatestRunForImplementation } from "@/stores/benchmarkStore";
 import { getCurrentDocument, usePersistentStore } from "@/stores/persistentStore";
 import { useUserStore } from "@/stores/userStore";
 import { useMonacoTabs } from "@/hooks/useMonacoTabs";
+import {
+  generateSetupDeclarations,
+  getCurrentSetupDeclarationContent,
+  getSetupDeclarationIdentity,
+  isSameSetupDeclarationIdentity,
+  type SetupDeclarations,
+} from "@/routes/playground/views/code/setup-declarations";
 import { DEFAULT_IMPLEMENTATION, README_FILE_ID, SETUP_FILE_ID } from "@/constants";
 import { cn } from "@/lib/utils";
 import { benchmarkService } from "@/services/benchmark/benchmark-service";
@@ -18,6 +25,17 @@ import { RunPanel, RunPanelTabs } from "@/components/playground/code/RunPanel";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 
 const MIN_SIDEBAR_WIDTH = 280;
+
+const isMonacoCancellationError = (value: unknown) =>
+  value instanceof Error &&
+  value.name === "Canceled" &&
+  value.message === "Canceled" &&
+  value.stack?.includes("/monaco-editor/") === true;
+
+interface SetupDeclarationEditor {
+  model: RawMonacoEditor.ITextModel;
+  monaco: MonacoEditor;
+}
 
 interface CodeViewProps {
   monacoTabs: ReturnType<typeof useMonacoTabs>;
@@ -39,6 +57,136 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
     })),
   );
   const { codeViewLayout: layout, setCodeViewLayout, theme } = useUserStore();
+  const setupDeclarationIdentity = useMemo(
+    () =>
+      getSetupDeclarationIdentity({
+        documentId,
+        libraries: currentDocument.libraries,
+        setupCode: currentDocument.setupCode,
+      }),
+    [currentDocument.libraries, currentDocument.setupCode, documentId],
+  );
+  const [monaco, setMonaco] = useState<MonacoEditor | null>(null);
+  const [setupDeclarationEditor, setSetupDeclarationEditor] =
+    useState<SetupDeclarationEditor | null>(null);
+  const [setupDeclarations, setSetupDeclarations] =
+    useState<SetupDeclarations | null>(null);
+  const pendingSetupDeclarationGenerationRef = useRef<
+    (() => Promise<void>) | null
+  >(null);
+  const isGeneratingSetupDeclarationsRef = useRef(false);
+
+  const processPendingSetupDeclarationGeneration = useCallback(async () => {
+    if (isGeneratingSetupDeclarationsRef.current) return;
+
+    isGeneratingSetupDeclarationsRef.current = true;
+    try {
+      while (pendingSetupDeclarationGenerationRef.current) {
+        const generate = pendingSetupDeclarationGenerationRef.current;
+        pendingSetupDeclarationGenerationRef.current = null;
+        await generate();
+      }
+    } finally {
+      isGeneratingSetupDeclarationsRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!monaco) return;
+
+    const resource = monaco.Uri.parse(
+      `file:///__setup-declarations__/${nanoid()}.ts`,
+    );
+    const model = monaco.editor.createModel("", "typescript", resource);
+    setSetupDeclarationEditor({ model, monaco });
+
+    return () => model.dispose();
+  }, [monaco]);
+
+  useEffect(() => {
+    if (!setupDeclarationEditor) return;
+
+    const setupCode = currentDocument.setupCode;
+    const libraries = currentDocument.libraries;
+    const { model, monaco } = setupDeclarationEditor;
+    let cancelled = false;
+
+    const isCurrent = () => {
+      if (cancelled || model.isDisposed()) return false;
+      const latestDocument = getCurrentDocument(usePersistentStore.getState());
+      return isSameSetupDeclarationIdentity(
+        setupDeclarationIdentity,
+        getSetupDeclarationIdentity({
+          documentId: latestDocument.id,
+          libraries: latestDocument.libraries,
+          setupCode: latestDocument.setupCode,
+        }),
+      );
+    };
+
+    const updateSetupDeclarations = async () => {
+      let content: string | null;
+      try {
+        content = await generateSetupDeclarations({
+          dependencyService,
+          libraries,
+          isCurrent,
+          emitDeclarations: async () => {
+            model.setValue(setupCode);
+            const modelVersion = model.getVersionId();
+            const isCurrentModelVersion = () =>
+              isCurrent() && model.getVersionId() === modelVersion;
+
+            const getWorker =
+              await monaco.languages.typescript.getTypeScriptWorker();
+            if (!isCurrentModelVersion()) return null;
+            const worker = await getWorker(model.uri);
+            if (!isCurrentModelVersion()) return null;
+            const outputs = await worker.getEmitOutput(
+              model.uri.toString(),
+              true,
+              true,
+            );
+            if (!isCurrentModelVersion()) return null;
+            return (
+              outputs.outputFiles.find((file) => file.name.endsWith(".d.ts"))
+                ?.text ?? null
+            );
+          },
+        });
+      } catch (error) {
+        if (!isCurrent() && isMonacoCancellationError(error)) return;
+        throw error;
+      }
+      if (!content || !isCurrent()) return;
+
+      const latestDocument = getCurrentDocument(usePersistentStore.getState());
+      setSetupDeclarations({ content, ...setupDeclarationIdentity });
+      if (latestDocument.setupDTS !== content) {
+        store.setSetupDTS(content);
+      }
+    };
+
+    pendingSetupDeclarationGenerationRef.current = updateSetupDeclarations;
+    processPendingSetupDeclarationGeneration();
+
+    return () => {
+      cancelled = true;
+      if (
+        pendingSetupDeclarationGenerationRef.current === updateSetupDeclarations
+      ) {
+        pendingSetupDeclarationGenerationRef.current = null;
+      }
+    };
+  }, [
+    currentDocument.libraries,
+    currentDocument.setupCode,
+    dependencyService,
+    processPendingSetupDeclarationGeneration,
+    setupDeclarationIdentity,
+    setupDeclarationEditor,
+    store,
+  ]);
 
   const currentImplementation = useMemo(() => {
     return currentDocument.implementations.find((item) => item.id === monacoTabs.activeTabId);
@@ -147,15 +295,22 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
     };
   }, [currentDocument.implementations, monacoTabs, store]);
 
+  const setupDeclarationContent = getCurrentSetupDeclarationContent(
+    setupDeclarations,
+    setupDeclarationIdentity,
+  );
+
   const extraLibs = useMemo(() => {
-    if (!currentImplementationId) return [];
+    if (!currentImplementationId || !setupDeclarationContent) {
+      return [];
+    }
     return [
       {
         filename: "file:///setup.d.ts",
-        content: currentDocument.setupDTS,
+        content: setupDeclarationContent,
       },
     ];
-  }, [currentDocument.setupDTS, currentImplementationId]);
+  }, [currentImplementationId, setupDeclarationContent]);
 
   const handleFileContentChange = useCallback(
     (content: string | undefined) => {
@@ -172,13 +327,6 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
     [monacoTabs.activeTabId, store],
   );
 
-  const handleSetupDTSChange = useCallback(
-    (value: string) => {
-      store.setSetupDTS(value);
-    },
-    [store],
-  );
-
   const handleRun = useCallback(() => {
     const document = getCurrentDocument(usePersistentStore.getState());
     const implementation = document.implementations.find((item) => item.id === monacoTabs.activeTabId);
@@ -192,16 +340,18 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
   }, [latestRun]);
 
   const defaultSidebarSize = (MIN_SIDEBAR_WIDTH * 100) / window.innerWidth;
+  let defaultEditorSize = 100;
+  if (currentImplementation) {
+    defaultEditorSize = layout === "vertical" ? 65 : 50;
+  }
 
   // editor
   const handleEditorMount = useCallback(
     (editor: RawMonacoEditor.IStandaloneCodeEditor, monaco: MonacoEditor) => {
       dependencyService.mountEditor(editor, monaco);
-      for (const item of currentDocument.libraries) {
-        dependencyService.addLibrary(item);
-      }
+      setMonaco(monaco);
     },
-    [currentDocument.libraries, dependencyService],
+    [dependencyService],
   );
 
   const runPanelRef = useRef<ImperativePanelHandle>(null);
@@ -245,7 +395,11 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
       <ResizablePanel id="right-panel">
         {/* right */}
         <ResizablePanelGroup className="h-full" direction={layout}>
-          <ResizablePanel defaultSize={70} id="editor-panel">
+          <ResizablePanel
+            defaultSize={defaultEditorSize}
+            id="editor-panel"
+            order={1}
+          >
             <Monaco
               extraLibs={extraLibs}
               language={monacoTabs.activeTabId?.endsWith(".md") ? "markdown" : "typescript"}
@@ -259,7 +413,6 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
               onCloseTab={monacoTabs.closeTab}
               onCloseTabsToLeft={monacoTabs.closeTabsToLeft}
               onCloseTabsToRight={monacoTabs.closeTabsToRight}
-              onDTSChange={monacoTabs.activeTabId === SETUP_FILE_ID ? handleSetupDTSChange : undefined}
               onMount={handleEditorMount}
               onSetTabs={monacoTabs.setTabs}
             />
@@ -274,6 +427,7 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
                 defaultSize={layout === "vertical" ? 35 : 50}
                 id="run-panel"
                 minSize={10}
+                order={2}
                 collapsible
               >
                 <RunPanel

@@ -262,6 +262,24 @@ describe("benchmark cancellation", () => {
 });
 
 describe("benchmark session lifecycle", () => {
+  it("settles after preprocessing fails and records the failed batch", async () => {
+    benchmarkMocks.bundleBenchmarkCode.mockRejectedValueOnce(
+      new Error("Benchmark code must return a function"),
+    );
+
+    const resultPromise = benchmarkService.runBenchmark(
+      "",
+      implementations.slice(0, 2),
+    );
+
+    await expect(resultPromise).resolves.toEqual([]);
+    expect(getRuns().map((run) => run.status)).toEqual(["failed", "failed"]);
+    expect(getRuns().map((run) => run.error)).toEqual([
+      "Benchmark code must return a function",
+      "Cancelled due to errors in other implementations",
+    ]);
+  });
+
   it("cancels and settles an active session before starting its replacement", async () => {
     const sessionA = await startBenchmark(implementations.slice(0, 2));
     let sessionAResult: BenchmarkResult[] | null = null;
@@ -309,7 +327,6 @@ describe("benchmark session lifecycle", () => {
 
   it("fails every active run and releases the worker after an error", async () => {
     const { resultPromise } = await startBenchmark(implementations.slice(0, 2));
-    const rejection = expect(resultPromise).rejects.toThrow("worker failed");
 
     dispatchWorkerMessage({
       type: "error",
@@ -317,7 +334,7 @@ describe("benchmark session lifecycle", () => {
       error: "worker failed",
     });
 
-    await rejection;
+    await expect(resultPromise).resolves.toEqual([]);
     expect(getRuns().map((run) => run.status)).toEqual(["failed", "failed"]);
     expect(benchmarkMocks.terminate).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
