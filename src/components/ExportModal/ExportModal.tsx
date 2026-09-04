@@ -3,14 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface ExportModalProps {
-  open: boolean;
+  isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   value: string;
 }
 
-export function ExportModal({ open, onOpenChange, value }: ExportModalProps) {
+export function ExportModal({ isOpen, onOpenChange, value }: ExportModalProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>Export Results</DialogTitle>

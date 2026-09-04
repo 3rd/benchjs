@@ -1,5 +1,5 @@
-import { createBenchmarkResult } from "@/testing/benchmark-fixtures";
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { createBenchmarkResult } from "@/testing/benchmark-fixtures";
 import { RunTab } from "./RunTab";
 
 const meta = {
@@ -11,11 +11,11 @@ export default meta;
 type Story = StoryObj<typeof RunTab>;
 
 const mockChartData = [
-  { time: 0, timePerOp: 12, iterations: 0 },
-  { time: 100, timePerOp: 11, iterations: 100 },
-  { time: 200, timePerOp: 10.5, iterations: 200 },
-  { time: 300, timePerOp: 10.2, iterations: 300 },
-  { time: 400, timePerOp: 10.1, iterations: 400 },
+  { time: 0, timePerOp: 12 },
+  { time: 100, timePerOp: 11 },
+  { time: 200, timePerOp: 10.5 },
+  { time: 300, timePerOp: 10.2 },
+  { time: 400, timePerOp: 10.1 },
 ];
 
 const now = Date.now();
@@ -31,8 +31,8 @@ export const Running: Story = {
       warmupEndedAt: now + 200,
       status: "running",
       progress: 45.5,
-      completedIterations: 455,
-      totalIterations: 1000,
+      measurementOperations: 455,
+      measurementElapsedMs: 4550,
       elapsedTime: 4550,
       error: null,
       result: null,
@@ -56,8 +56,8 @@ export const Completed: Story = {
       warmupEndedAt: now + 200,
       status: "completed",
       progress: 100,
-      completedIterations: 1000,
-      totalIterations: 1000,
+      measurementOperations: 1000,
+      measurementElapsedMs: 10_000,
       elapsedTime: 10_000,
       error: null,
       filename: "test.js",
@@ -99,10 +99,35 @@ export const Error: Story = {
       warmupEndedAt: now + 200,
       status: "failed",
       progress: 45.5,
-      completedIterations: 455,
-      totalIterations: 1000,
+      measurementOperations: 455,
+      measurementElapsedMs: 4550,
       elapsedTime: 4550,
       error: "Failed to execute benchmark: Stack overflow",
+      filename: "test.js",
+      originalCode: "function test() {}",
+      processedCode: "function test() {}",
+      result: null,
+    },
+    chartData: mockChartData,
+    clearChartData: () => {},
+  },
+};
+
+export const Cancelled: Story = {
+  args: {
+    isRunning: false,
+    latestRun: {
+      id: "1",
+      implementationId: "impl-1",
+      createdAt: now,
+      warmupStartedAt: now + 100,
+      warmupEndedAt: now + 200,
+      status: "cancelled",
+      progress: 45.5,
+      measurementOperations: 455,
+      measurementElapsedMs: 4550,
+      elapsedTime: 4550,
+      error: null,
       filename: "test.js",
       originalCode: "function test() {}",
       processedCode: "function test() {}",

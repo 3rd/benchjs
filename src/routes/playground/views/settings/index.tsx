@@ -4,7 +4,7 @@ import { Trash2 } from "lucide-react";
 import { useDependenciesStore } from "@/stores/dependenciesStore";
 import { getCurrentDocument, usePersistentStore } from "@/stores/persistentStore";
 import { cache } from "@/services/dependencies/cache";
-import { DependencyService } from "@/services/dependencies/DependencyService";
+import { DependencyService, getPackageNameFromSpec } from "@/services/dependencies/DependencyService";
 import { searchNpmPackages } from "@/services/dependencies/npmSearch";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
   const [cacheCount, setCacheCount] = useState(0);
   const [suggestions, setSuggestions] = useState<ComboboxOption[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -34,9 +35,9 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
     return <Badge variant="success">{status}</Badge>;
   };
 
-  const getPackageNameFromSpec = (spec: string): string => {
-    const match = spec.match(/^(@?[^@]+)(?:@.+)?$/);
-    return match ? match[1] : spec;
+  const removePackage = (name: string) => {
+    store.removeLibrary(name);
+    dependencyService.removeLibrary(name);
   };
 
   const addPackage = async (packageSpec: string, packageNameFromOption?: string) => {
@@ -49,12 +50,13 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
       return libPackageName === packageName;
     });
 
-    libsToRemove.forEach((lib) => {
-      store.removeLibrary(lib.name);
-    });
+    for (const lib of libsToRemove) {
+      removePackage(lib.name);
+    }
 
     setLibraryName("");
     setSuggestions([]);
+    setHasSearched(false);
     store.addLibrary(trimmedName);
     await dependencyService.addLibrary({ name: trimmedName });
     setCacheCount(await cache.count());
@@ -72,6 +74,7 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
 
   const handleSearchChange = (query: string) => {
     setLibraryName(query);
+    setHasSearched(false);
     setSearchError(null);
 
     // cancel previous timeout
@@ -101,11 +104,9 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
         const results = await searchNpmPackages(query, 10, controller.signal);
         if (controller.signal.aborted) return;
 
-        const isVersionSelection = query.trim().endsWith("@");
-
         const options: ComboboxOption[] = results.map((pkg) => ({
           value: pkg.name,
-          label: isVersionSelection ? pkg.version : pkg.name,
+          label: pkg.label,
           description: pkg.description,
           metadata: pkg.version,
           packageName: pkg.packageName,
@@ -114,9 +115,11 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
         }));
 
         setSuggestions(options);
+        setHasSearched(true);
         setSearchError(null);
       } catch (error) {
         if (controller.signal.aborted) return;
+        setHasSearched(false);
         setSearchError(error instanceof Error ? error.message : "Failed to search packages");
         setSuggestions([]);
       } finally {
@@ -138,10 +141,6 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
       }
     };
   }, []);
-
-  const handleRemoveLibrary = (name: string) => {
-    store.removeLibrary(name);
-  };
 
   const handleClearCache = async () => {
     await cache.clear();
@@ -181,11 +180,12 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
                     className="flex-1"
                     placeholder="Search packages..."
                     value={libraryName}
-                    onChange={handleSearchChange}
-                    onSelect={handleSelectPackage}
                     options={suggestions}
                     isLoading={isSearching}
+                    hasSearched={hasSearched}
                     error={searchError}
+                    onChange={handleSearchChange}
+                    onSelect={handleSelectPackage}
                   />
                   <Button onClick={handleAddLibrary}>Add</Button>
                 </div>
@@ -231,11 +231,7 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
                               : getStatusBadge("loading")}
                             </TableCell>
                             <TableCell>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => handleRemoveLibrary(lib.name)}
-                              >
+                              <Button size="icon" variant="ghost" onClick={() => removePackage(lib.name)}>
                                 <Trash2 className="w-4 h-4" />
                               </Button>
                             </TableCell>

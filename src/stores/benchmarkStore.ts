@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import type { ClockProfile, MeasurementPhase, PairedComparison } from "benchmate";
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
+import type { ClockProfile, MeasurementPhase, PairedComparison } from "benchmate";
 import { BenchmarkPhase, BenchmarkResult } from "@/services/benchmark/types";
 
 export type BenchmarkStatus = "cancelled" | "completed" | "failed" | "running" | "warmup";
@@ -20,8 +20,8 @@ export interface BenchmarkRun {
   // null while warmup/pilot collect evidence (indeterminate); measurement reports 0-100
   progress: number | null;
   elapsedTime: number;
-  completedIterations: number;
-  totalIterations: number;
+  measurementOperations: number;
+  measurementElapsedMs: number;
   error: string | null;
   result: BenchmarkResult | null;
   memoryUsage?: number;
@@ -30,7 +30,6 @@ export interface BenchmarkRun {
 export interface ChartDataPoint {
   time: number;
   timePerOp: number;
-  iterations: number;
   phase?: MeasurementPhase | null;
 }
 
@@ -53,6 +52,14 @@ export interface BenchmarkState {
   runs: Record<string, BenchmarkRun[]>; // { [implementationId]: BenchmarkRun }
   addRuns: (run: BenchmarkRun[]) => void;
   updateRun: (id: string, data: Partial<Omit<BenchmarkRun, "id">>) => void;
+  terminalizeRuns: (
+    runIds: ReadonlySet<string>,
+    status: "cancelled" | "failed",
+    error: string | null,
+  ) => void;
+  discardRunsForImplementations: (
+    implementationIds: ReadonlySet<string>,
+  ) => void;
   removeRun: (id: string) => void;
 
   runInfoByRunId: Record<string, RunInfo>;
@@ -103,6 +110,74 @@ export const useBenchmarkStore = create<BenchmarkState>()(
         }
 
         return { runs: updatedRuns };
+      }),
+    terminalizeRuns: (runIds, status, error) =>
+      set((state) => {
+        let changed = false;
+        const updatedRuns = { ...state.runs };
+
+        for (const [implementationId, implementationRuns] of Object.entries(state.runs)) {
+          let updatedImplementationRuns: BenchmarkRun[] | null = null;
+
+          for (let index = 0; index < implementationRuns.length; index += 1) {
+            const run = implementationRuns[index];
+            if (!runIds.has(run.id)) continue;
+            if (run.status !== "running" && run.status !== "warmup") continue;
+
+            updatedImplementationRuns ??= [...implementationRuns];
+            updatedImplementationRuns[index] = {
+              ...run,
+              status,
+              progress: null,
+              error,
+            };
+          }
+
+          if (!updatedImplementationRuns) continue;
+          updatedRuns[implementationId] = updatedImplementationRuns;
+          changed = true;
+        }
+
+        return changed ? { runs: updatedRuns } : state;
+      }),
+    discardRunsForImplementations: (implementationIds) =>
+      set((state) => {
+        const discardedRunIds = new Set<string>();
+        const runs: Record<string, BenchmarkRun[]> = {};
+        let changed = false;
+
+        for (const [implementationId, implementationRuns] of Object.entries(
+          state.runs,
+        )) {
+          if (!implementationIds.has(implementationId)) {
+            runs[implementationId] = implementationRuns;
+            continue;
+          }
+
+          changed = true;
+          for (const run of implementationRuns) discardedRunIds.add(run.id);
+        }
+
+        if (!changed) return state;
+
+        return {
+          runs,
+          runInfoByRunId: Object.fromEntries(
+            Object.entries(state.runInfoByRunId).filter(
+              ([runId]) => !discardedRunIds.has(runId),
+            ),
+          ),
+          chartData: Object.fromEntries(
+            Object.entries(state.chartData).filter(
+              ([runId]) => !discardedRunIds.has(runId),
+            ),
+          ),
+          consoleLogs: Object.fromEntries(
+            Object.entries(state.consoleLogs).filter(
+              ([runId]) => !discardedRunIds.has(runId),
+            ),
+          ),
+        };
       }),
     removeRun: (id) =>
       set((state) => ({

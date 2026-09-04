@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import { horizontalListSortingStrategy, SortableContext } from "@dnd-kit/sortable";
 import Editor, { loader, Monaco as MonacoEditor, useMonaco } from "@monaco-editor/react";
-import type { editor } from "monaco-editor";
+import type { editor, IDisposable, languages, Uri } from "monaco-editor";
+import type { CompletionEntry, CompletionInfo } from "typescript";
 import { cn } from "@/lib/utils";
 import { MonacoTab } from "@/components/common/MonacoTab";
 
@@ -13,6 +14,220 @@ import vsLight from "./themes/vs-light.json";
 export const themes = {
   light: vsLight,
   dark: vsDark,
+};
+
+const EDITOR_THEME_NAME = "theme";
+const SCRIPT_LANGUAGES: readonly ("javascript" | "typescript")[] = ["javascript", "typescript"];
+const TYPESCRIPT_COMPLETION_TRIGGER_CHARACTERS = ["."];
+
+type TypeScriptCompletionItem = languages.CompletionItem & {
+  completionName: string;
+  completionOffset: number;
+  completionResource: Uri;
+};
+
+const isTypeScriptCompletionItem = (
+  monaco: MonacoEditor,
+  item: languages.CompletionItem,
+): item is TypeScriptCompletionItem =>
+  "completionName" in item &&
+  typeof item.completionName === "string" &&
+  "completionOffset" in item &&
+  typeof item.completionOffset === "number" &&
+  "completionResource" in item &&
+  monaco.Uri.isUri(item.completionResource);
+
+const getCompletionKind = (monaco: MonacoEditor, kind: string) => {
+  switch (kind) {
+    case "primitive type":
+    case "keyword": {
+      return monaco.languages.CompletionItemKind.Keyword;
+    }
+    case "var":
+    case "local var":
+    case "const":
+    case "let":
+    case "alias":
+    case "parameter": {
+      return monaco.languages.CompletionItemKind.Variable;
+    }
+    case "property":
+    case "getter":
+    case "setter": {
+      return monaco.languages.CompletionItemKind.Field;
+    }
+    case "function":
+    case "local function": {
+      return monaco.languages.CompletionItemKind.Function;
+    }
+    case "method":
+    case "construct":
+    case "call":
+    case "index": {
+      return monaco.languages.CompletionItemKind.Method;
+    }
+    case "enum": {
+      return monaco.languages.CompletionItemKind.Enum;
+    }
+    case "enum member": {
+      return monaco.languages.CompletionItemKind.EnumMember;
+    }
+    case "module":
+    case "external module name": {
+      return monaco.languages.CompletionItemKind.Module;
+    }
+    case "class":
+    case "type": {
+      return monaco.languages.CompletionItemKind.Class;
+    }
+    case "interface": {
+      return monaco.languages.CompletionItemKind.Interface;
+    }
+    case "warning": {
+      return monaco.languages.CompletionItemKind.Text;
+    }
+    case "script": {
+      return monaco.languages.CompletionItemKind.File;
+    }
+    case "directory": {
+      return monaco.languages.CompletionItemKind.Folder;
+    }
+    case "string": {
+      return monaco.languages.CompletionItemKind.Constant;
+    }
+    default: {
+      return monaco.languages.CompletionItemKind.Property;
+    }
+  }
+};
+
+const displayPartsToString = (parts: readonly { text: string }[] | undefined) =>
+  parts?.map((part) => part.text).join("") ?? "";
+
+const getModelPath = (fileId: string, modelPathPrefix?: string) => {
+  if (modelPathPrefix === undefined) return encodeURIComponent(fileId);
+  return `${encodeURIComponent(modelPathPrefix)}/${encodeURIComponent(fileId)}`;
+};
+
+const disposeModelsForPathPrefix = (
+  monaco: MonacoEditor,
+  pathPrefix: string,
+  retainedPaths: ReadonlySet<string>,
+) => {
+  for (const model of monaco.editor.getModels()) {
+    if (model.uri.scheme !== "file") continue;
+    if (!model.uri.path.startsWith(pathPrefix)) continue;
+    if (retainedPaths.has(model.uri.path)) continue;
+    model.dispose();
+  }
+};
+
+const createTypeScriptCompletionProvider = (
+  monaco: MonacoEditor,
+  language: "javascript" | "typescript",
+): languages.CompletionItemProvider => {
+  const getWorker =
+    language === "typescript" ?
+      monaco.languages.typescript.getTypeScriptWorker
+    : monaco.languages.typescript.getJavaScriptWorker;
+
+  return {
+    triggerCharacters: TYPESCRIPT_COMPLETION_TRIGGER_CHARACTERS,
+    async provideCompletionItems(model, position, _context, token) {
+      const workerFactory = await getWorker();
+      const worker = await workerFactory(model.uri);
+      if (token.isCancellationRequested || model.isDisposed()) return;
+
+      const offset = model.getOffsetAt(position);
+      const completions: CompletionInfo | undefined = await worker.getCompletionsAtPosition(
+        model.uri.toString(),
+        offset,
+      );
+      if (!completions || token.isCancellationRequested || model.isDisposed()) return;
+
+      const word = model.getWordUntilPosition(position);
+      const wordRange = new monaco.Range(
+        position.lineNumber,
+        word.startColumn,
+        position.lineNumber,
+        word.endColumn,
+      );
+
+      return {
+        incomplete: completions.isIncomplete,
+        suggestions: completions.entries.map((entry: CompletionEntry) => {
+          let range: languages.CompletionItem["range"] = wordRange;
+          if (entry.replacementSpan) {
+            const start = model.getPositionAt(entry.replacementSpan.start);
+            const end = model.getPositionAt(entry.replacementSpan.start + entry.replacementSpan.length);
+            range = new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column);
+          } else if (completions.optionalReplacementSpan) {
+            const start = model.getPositionAt(completions.optionalReplacementSpan.start);
+            const end = model.getPositionAt(
+              completions.optionalReplacementSpan.start + completions.optionalReplacementSpan.length,
+            );
+            range = {
+              insert: new monaco.Range(
+                wordRange.startLineNumber,
+                wordRange.startColumn,
+                position.lineNumber,
+                position.column,
+              ),
+              replace: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
+            };
+          }
+
+          const item: TypeScriptCompletionItem = {
+            label: entry.labelDetails ? { label: entry.name, ...entry.labelDetails } : entry.name,
+            insertText: entry.insertText ?? entry.name,
+            insertTextRules:
+              entry.isSnippet ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
+            filterText: entry.filterText,
+            sortText: entry.sortText,
+            kind: getCompletionKind(monaco, entry.kind),
+            preselect: entry.isRecommended,
+            commitCharacters: entry.commitCharacters ?? completions.defaultCommitCharacters,
+            tags:
+              entry.kindModifiers?.includes("deprecated") ?
+                [monaco.languages.CompletionItemTag.Deprecated]
+              : undefined,
+            range,
+            completionName: entry.name,
+            completionOffset: offset,
+            completionResource: model.uri,
+          };
+          return item;
+        }),
+      };
+    },
+    async resolveCompletionItem(item, token) {
+      if (!isTypeScriptCompletionItem(monaco, item)) return item;
+      const workerFactory = await getWorker();
+      const worker = await workerFactory(item.completionResource);
+      if (token.isCancellationRequested) return item;
+
+      const details = await worker.getCompletionEntryDetails(
+        item.completionResource.toString(),
+        item.completionOffset,
+        item.completionName,
+      );
+      if (!details || token.isCancellationRequested) return item;
+
+      let documentation = displayPartsToString(details.documentation);
+      for (const tag of details.tags ?? []) {
+        const tagText = typeof tag.text === "string" ? tag.text : displayPartsToString(tag.text);
+        const tagSuffix = tagText ? `: ${tagText}` : "";
+        documentation += `\n\n*@${tag.name}*${tagSuffix}`;
+      }
+
+      return {
+        ...item,
+        kind: getCompletionKind(monaco, details.kind),
+        detail: displayPartsToString(details.displayParts),
+        documentation: documentation ? { value: documentation } : undefined,
+      };
+    },
+  };
 };
 
 const transformToGlobalDeclarations = (dts: string) => {
@@ -63,17 +278,114 @@ export const Monaco = ({
   onCloseTabsToLeft,
   onCloseTabsToRight,
   onSetTabs,
+  onChange,
   onDTSChange,
   onMount,
   ...props
 }: MonacoProps) => {
+  const [isLoaderConfigured, setIsLoaderConfigured] = useState(false);
+
+  useEffect(() => {
+    loader.config({
+      paths: {
+        vs: `${location.origin}/monaco-editor/min/vs`,
+      },
+    });
+    setIsLoaderConfigured(true);
+  }, []);
+
   const monacoHelper = useMonaco();
   const activeFile = tabs?.find((f) => f.active);
-  const activeFileName = activeFile?.name ?? "main.ts";
-  const activeFilePath = modelPathPrefix ? `${modelPathPrefix}/${activeFileName}` : activeFileName;
+  const activeFileId = activeFile?.id ?? "main.ts";
+  const activeFilePath = getModelPath(activeFileId, modelPathPrefix);
+  const ownedModelPathPrefix =
+    modelPathPrefix === undefined ?
+      null
+    : `/${encodeURIComponent(modelPathPrefix)}/`;
 
+  useEffect(() => {
+    if (!monacoHelper) return;
+
+    const resource = monacoHelper.Uri.parse(`file:///${activeFilePath}`);
+    const registrations = SCRIPT_LANGUAGES.map((language) =>
+      monacoHelper.languages.registerCompletionItemProvider(
+        {
+          language,
+          scheme: resource.scheme,
+          pattern: resource.path,
+          exclusive: true,
+        },
+        createTypeScriptCompletionProvider(monacoHelper, language),
+      ),
+    );
+
+    return () => {
+      for (const registration of registrations) registration.dispose();
+    };
+  }, [activeFilePath, monacoHelper]);
+
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const modelChangeRegistrationRef = useRef<IDisposable | null>(null);
+  const previousModelPathPrefixRef = useRef<string | null>(null);
+  const retainedModelPathsRef = useRef<ReadonlySet<string>>(new Set());
+  retainedModelPathsRef.current = new Set(
+    (tabs ?? []).map((tab) => `/${getModelPath(tab.id, modelPathPrefix)}`),
+  );
   const onDTSChangeRef = useRef<((value: string) => void) | null>(null);
   onDTSChangeRef.current = onDTSChange ?? null;
+  const mountRef = useRef<{
+    options: editor.IStandaloneEditorConstructionOptions | undefined;
+    onMount: MonacoProps["onMount"];
+  }>({ options: undefined, onMount: undefined });
+  mountRef.current = { options: props.options, onMount };
+
+  useEffect(() => {
+    const previousModelPathPrefix = previousModelPathPrefixRef.current;
+    if (
+      monacoHelper &&
+      previousModelPathPrefix &&
+      previousModelPathPrefix !== ownedModelPathPrefix
+    ) {
+      disposeModelsForPathPrefix(monacoHelper, previousModelPathPrefix, new Set());
+    }
+    previousModelPathPrefixRef.current = ownedModelPathPrefix;
+  }, [monacoHelper, ownedModelPathPrefix]);
+
+  useEffect(() => {
+    if (!monacoHelper || !ownedModelPathPrefix || !tabs) return;
+
+    const retainedPaths = new Set(retainedModelPathsRef.current);
+    const currentModel = editorRef.current?.getModel();
+    if (currentModel) retainedPaths.add(currentModel.uri.path);
+    disposeModelsForPathPrefix(monacoHelper, ownedModelPathPrefix, retainedPaths);
+  }, [modelPathPrefix, monacoHelper, ownedModelPathPrefix, tabs]);
+
+  useEffect(() => {
+    if (!monacoHelper) return;
+
+    return () => {
+      modelChangeRegistrationRef.current?.dispose();
+      modelChangeRegistrationRef.current = null;
+      editorRef.current = null;
+      const ownedPathPrefix = previousModelPathPrefixRef.current;
+      if (!ownedPathPrefix) return;
+      disposeModelsForPathPrefix(monacoHelper, ownedPathPrefix, new Set());
+    };
+  }, [monacoHelper]);
+
+  useEffect(() => {
+    if (!monacoHelper) return;
+
+    const registrations = (extraLibs ?? []).map((lib) =>
+      monacoHelper.languages.typescript.typescriptDefaults.addExtraLib(lib.content, lib.filename),
+    );
+
+    return () => {
+      for (const registration of registrations) {
+        registration.dispose();
+      }
+    };
+  }, [extraLibs, monacoHelper]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -88,8 +400,8 @@ export const Monaco = ({
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
-    const oldIndex = tabs.findIndex((item) => item.name === active.id);
-    const newIndex = tabs.findIndex((item) => item.name === over.id);
+    const oldIndex = tabs.findIndex((item) => item.id === active.id);
+    const newIndex = tabs.findIndex((item) => item.id === over.id);
 
     if (oldIndex !== -1 && newIndex !== -1) {
       const newOrder = [...tabs];
@@ -100,12 +412,6 @@ export const Monaco = ({
   };
 
   const handleBeforeMount = (monaco: MonacoEditor) => {
-    loader.config({
-      paths: {
-        vs: `${location.origin}/monaco-editor/min/vs`,
-      },
-    });
-
     monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
       moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
       target: monaco.languages.typescript.ScriptTarget.ESNext,
@@ -124,31 +430,47 @@ export const Monaco = ({
       noSyntaxValidation: false,
       diagnosticCodesToIgnore: [],
     });
-
-    // init libs
-    monaco.languages.typescript.typescriptDefaults.setExtraLibs([]);
-    for (const lib of extraLibs ?? []) {
-      monaco.languages.typescript.typescriptDefaults.addExtraLib(lib.content, lib.filename);
-    }
   };
 
+  const handleChange = useCallback(
+    async (value: string | undefined) => {
+      onChange?.(value);
+
+      if (!onDTSChangeRef.current || !monacoHelper) return;
+
+      const model = editorRef.current?.getModel();
+      if (!model) return;
+      const modelVersion = model.getVersionId();
+      const modelUri = model.uri;
+      const isCurrentModelVersion = () =>
+        !model.isDisposed() &&
+        editorRef.current?.getModel() === model &&
+        model.getVersionId() === modelVersion;
+
+      const tsWorker = await monacoHelper.languages.typescript.getTypeScriptWorker();
+      if (!isCurrentModelVersion()) return;
+      const worker = await tsWorker(modelUri);
+      if (!isCurrentModelVersion()) return;
+      const outputs = await worker.getEmitOutput(modelUri.toString(), true, true);
+      if (!isCurrentModelVersion()) return;
+      const dts = outputs.outputFiles.find((file) => file.name.endsWith(".d.ts"))?.text;
+      if (!dts) return;
+
+      onDTSChangeRef.current?.(transformToGlobalDeclarations(dts));
+    },
+    [monacoHelper, onChange],
+  );
+
   const handleMount = useCallback((editor: editor.IStandaloneCodeEditor, monaco: MonacoEditor) => {
-    editor.onDidChangeModelContent(async () => {
-      const value = editor.getValue();
-      props.onChange?.(value);
-
-      if (onDTSChangeRef.current) {
-        const model = editor.getModel();
-        if (!model) return;
-        const tsWorker = await monaco.languages.typescript.getTypeScriptWorker();
-        const worker = await tsWorker(model.uri);
-        const outputs = await worker.getEmitOutput(model.uri.toString(), true, true);
-        const dts = outputs.outputFiles.find((file) => file.name.endsWith(".d.ts"))?.text;
-        if (!dts) return;
-
-        const transformedDTS = dts ? transformToGlobalDeclarations(dts) : "";
-        onDTSChangeRef.current?.(transformedDTS);
-      }
+    editorRef.current = editor;
+    modelChangeRegistrationRef.current?.dispose();
+    modelChangeRegistrationRef.current = editor.onDidChangeModel((event) => {
+      const oldModelUri = event.oldModelUrl;
+      const ownedPathPrefix = previousModelPathPrefixRef.current;
+      if (!oldModelUri || !ownedPathPrefix) return;
+      if (!oldModelUri.path.startsWith(ownedPathPrefix)) return;
+      if (retainedModelPathsRef.current.has(oldModelUri.path)) return;
+      monaco.editor.getModel(oldModelUri)?.dispose();
     });
 
     editor.updateOptions({
@@ -169,12 +491,10 @@ export const Monaco = ({
       scrollBeyondLastLine: false,
       renderLineHighlightOnlyWhenFocus: true,
       overviewRulerBorder: false,
-      ...props.options,
+      ...mountRef.current.options,
     });
 
-    onMount?.(editor, monaco);
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    mountRef.current.onMount?.(editor, monaco);
   }, []);
 
   // sync theme
@@ -183,8 +503,8 @@ export const Monaco = ({
     const themeConfig = themes[(theme as keyof typeof themes) ?? "vsLight"] as Parameters<
       typeof monacoHelper.editor.defineTheme
     >[1];
-    monacoHelper.editor.defineTheme("theme", themeConfig);
-    monacoHelper.editor.setTheme("theme");
+    monacoHelper.editor.defineTheme(EDITOR_THEME_NAME, themeConfig);
+    monacoHelper.editor.setTheme(EDITOR_THEME_NAME);
   }, [monacoHelper, theme]);
 
   return (
@@ -193,7 +513,7 @@ export const Monaco = ({
       {tabs && tabs.length > 0 && (
         <DndContext modifiers={[restrictToHorizontalAxis]} sensors={sensors} onDragEnd={handleDragEnd}>
           <div className="flex border-b border-border bg-muted">
-            <SortableContext items={tabs.map((f) => f.name)} strategy={horizontalListSortingStrategy}>
+            <SortableContext items={tabs.map((f) => f.id)} strategy={horizontalListSortingStrategy}>
               <div className="flex overflow-x-auto overflow-y-hidden custom-scrollbar">
                 {tabs.map((file) => (
                   <MonacoTab
@@ -215,15 +535,18 @@ export const Monaco = ({
 
       {/* editor */}
       <div className="h-full">
-        <Editor
-          {...props}
-          key={activeFileName}
-          beforeMount={handleBeforeMount}
-          className={cn("nodrag h-full", className)}
-          path={activeFilePath}
-          theme="custom"
-          onMount={handleMount}
-        />
+        {isLoaderConfigured && (
+          <Editor
+            {...props}
+            beforeMount={handleBeforeMount}
+            className={cn("nodrag h-full", className)}
+            path={activeFilePath}
+            saveViewState={false}
+            theme={EDITOR_THEME_NAME}
+            onChange={handleChange}
+            onMount={handleMount}
+          />
+        )}
       </div>
     </div>
   );

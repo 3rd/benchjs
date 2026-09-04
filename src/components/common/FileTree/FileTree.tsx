@@ -52,6 +52,7 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
 
   const isRoot = item.type === "root";
   const isActive = activeFileId === item.id;
+  const renameErrorId = `file-tree-rename-error-${item.id}`;
 
   const handleRename = (value: string) => {
     const trimmedName = value.trim();
@@ -74,7 +75,7 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
     return (
       <div
         className={cn(
-          "flex items-center h-6 px-2 hover:bg-accent cursor-pointer rounded group relative",
+          "flex items-center min-h-8 px-2 hover:bg-accent cursor-pointer rounded group relative",
           isActive && "bg-accent",
         )}
         style={{ paddingLeft: `${(level + 1) * 10}px` }}
@@ -90,6 +91,7 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
           className={cn(
             "mr-1.5 ml-0.5 w-3.5 h-3.5 shrink-0 text-muted-foreground",
             isActive && "text-foreground",
+            renameError && "self-start mt-1",
           )}
         />
 
@@ -98,6 +100,8 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
           editingName ?
             <div className="flex-1">
               <Input
+                aria-describedby={renameError ? renameErrorId : undefined}
+                aria-invalid={renameError ? true : undefined}
                 className={cn(
                   "py-0 w-40 h-6 text-sm",
                   renameError && "border-destructive focus-visible:ring-destructive",
@@ -105,10 +109,9 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
                 value={newName}
                 autoFocus
                 onBlur={() => {
-                  if (!renameError) {
-                    setEditingName(false);
-                    setNewName(item.name);
-                  }
+                  setEditingName(false);
+                  setNewName(item.name);
+                  setRenameError(null);
                 }}
                 onChange={(e) => {
                   setNewName(e.target.value);
@@ -126,6 +129,11 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
                   }
                 }}
               />
+              {renameError && (
+                <p id={renameErrorId} className="mt-1 text-xs leading-tight text-destructive" role="alert">
+                  {renameError}
+                </p>
+              )}
             </div>
             // render mode
           : <div
@@ -134,9 +142,7 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
               onClick={() => onFileClick?.(item)}
             >
               {/* name */}
-              <span
-                className={cn("truncate flex-1 text-sm text-left", isActive && "font-medium")}
-              >
+              <span className={cn("truncate flex-1 text-sm text-left", isActive && "font-medium")}>
                 {item.name}
               </span>
 
@@ -207,7 +213,7 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
       {/* directory */}
       {!isRoot && (
         <div
-          className={cn("flex items-center h-6 px-2 hover:bg-accent cursor-pointer rounded group relative")}
+          className={cn("flex items-center h-8 px-2 hover:bg-accent cursor-pointer rounded group relative")}
           style={{ paddingLeft: `${level * 10}px` }}
           onClick={() => setIsOpen(!isOpen)}
         >

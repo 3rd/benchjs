@@ -6,6 +6,7 @@ type BenchmarkStatsOverrides = {
   elapsedMs?: number;
   timePerOperationMs?: Partial<BenchmarkResult["stats"]["timePerOperationMs"]>;
   operationsPerSecond?: Partial<BenchmarkResult["stats"]["operationsPerSecond"]>;
+  observations?: BenchmarkResult["evidence"]["observations"];
 };
 
 export const createBenchmarkResult = (
@@ -54,7 +55,7 @@ export const createBenchmarkResult = (
     status: "complete",
     reasons: [],
     statsProvenance: { observationPhase: "measurement", modelPhase: null },
-    observations: [],
+    observations: overrides.observations ?? [],
     interval: null,
   },
 });

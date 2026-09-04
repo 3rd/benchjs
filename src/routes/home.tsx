@@ -31,8 +31,7 @@ const PILLARS = [
   {
     number: "01",
     title: "Create a benchmark",
-    description:
-      "Write setup code and each implementation in JavaScript or TypeScript.",
+    description: "Write setup code and each implementation in JavaScript or TypeScript.",
   },
   {
     number: "02",
@@ -43,8 +42,7 @@ const PILLARS = [
   {
     number: "03",
     title: "Compare or share",
-    description:
-      "Compare the results. Share the benchmark URL or export the comparison as an image.",
+    description: "Compare the results. Share the benchmark URL or export the comparison as an image.",
   },
 ];
 
@@ -64,10 +62,7 @@ const HomePage = () => {
           </Link>
 
           <div className="flex items-center gap-1">
-            <nav
-              aria-label="Main navigation"
-              className="flex items-center gap-1"
-            >
+            <nav aria-label="Main navigation" className="flex items-center gap-1">
               <a
                 className="hidden items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:inline-flex"
                 href="https://github.com/3rd/benchjs"
@@ -78,9 +73,9 @@ const HomePage = () => {
                 GitHub
               </a>
               <Button
-                asChild
                 className="ml-1 rounded-full px-4 dark:bg-brand dark:text-zinc-950 dark:hover:bg-yellow-400"
                 size="default"
+                asChild
               >
                 <Link to="/playground">
                   Open playground
@@ -107,31 +102,22 @@ const HomePage = () => {
               </h1>
 
               <p className="mt-8 max-w-xl text-pretty text-lg leading-8 text-muted-foreground sm:text-xl">
-                Write JavaScript or TypeScript benchmarks, compare
-                implementations, and share a link. No account or install
-                required.
+                Write JavaScript or TypeScript benchmarks, compare implementations, and share a link. No
+                account or install required.
               </p>
 
               <div className="mt-9 flex flex-col gap-3 sm:flex-row">
                 <Button
-                  asChild
                   className="h-12 rounded-full px-6 text-base shadow-lg shadow-foreground/10 dark:bg-brand dark:text-zinc-950 dark:hover:bg-yellow-400"
+                  asChild
                 >
                   <Link to="/playground">
                     <Play className="fill-current" />
                     Open playground
                   </Link>
                 </Button>
-                <Button
-                  asChild
-                  className="h-12 rounded-full px-6 text-base"
-                  variant="outline"
-                >
-                  <a
-                    href="https://github.com/3rd/benchjs"
-                    rel="noopener noreferrer"
-                    target="_blank"
-                  >
+                <Button className="h-12 rounded-full px-6 text-base" variant="outline" asChild>
+                  <a href="https://github.com/3rd/benchjs" rel="noopener noreferrer" target="_blank">
                     <SiGithub />
                     GitHub
                   </a>
@@ -148,9 +134,7 @@ const HomePage = () => {
                       Bench<span className="bg-yellow-400 px-0.5">JS</span>
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 font-mono text-[11px] text-zinc-500">
-                    Array sum
-                  </div>
+                  <div className="flex items-center gap-2 font-mono text-[11px] text-zinc-500">Array sum</div>
                   <div className="flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2 py-1 text-[10px] font-medium text-zinc-700">
                     <Share2 className="size-3" />
                     Share
@@ -172,9 +156,7 @@ const HomePage = () => {
                         </div>
                       </div>
                       <aside className="hidden border-r border-zinc-200 bg-zinc-50 px-3 py-4 text-[11px] text-zinc-500 sm:block">
-                        <p className="mb-3 font-semibold uppercase tracking-[0.16em] text-zinc-600">
-                          Code
-                        </p>
+                        <p className="mb-3 font-semibold uppercase tracking-[0.16em] text-zinc-600">Code</p>
                         <div className="space-y-1.5 font-mono">
                           <p className="text-zinc-600">setup.ts</p>
                           <p className="flex items-center gap-1.5 rounded bg-yellow-100 px-1.5 py-1 text-zinc-900">
@@ -191,29 +173,20 @@ const HomePage = () => {
                           <div className="border-b-2 border-yellow-500 px-3 pb-2 text-zinc-900">
                             for-loop.ts
                           </div>
-                          <div className="px-3 pb-2 text-zinc-600">
-                            setup.ts
-                          </div>
+                          <div className="px-3 pb-2 text-zinc-600">setup.ts</div>
                         </div>
                         <pre className="overflow-x-auto p-5 font-mono text-[12px] leading-7 text-zinc-700 sm:text-[13px]">
                           <code>
-                            <span className="text-fuchsia-700">
-                              export const
-                            </span>{" "}
-                            <span className="text-blue-700">run</span> = () =
-                            {">"} {"{"}
-                            {"\n"} <span className="text-fuchsia-700">let</span>{" "}
-                            total =<span className="text-amber-700"> 0</span>;
-                            {"\n\n"}{" "}
+                            <span className="text-fuchsia-700">export const</span>{" "}
+                            <span className="text-blue-700">run</span> = () ={">"} {"{"}
+                            {"\n"} <span className="text-fuchsia-700">let</span> total =
+                            <span className="text-amber-700"> 0</span>;{"\n\n"}{" "}
                             <span className="text-fuchsia-700">for</span> (
                             <span className="text-fuchsia-700">let</span> i =
-                            <span className="text-amber-700"> 0</span>; i {"<"}{" "}
-                            values.length; i++) {"{"}
+                            <span className="text-amber-700"> 0</span>; i {"<"} values.length; i++) {"{"}
                             {"\n"} total += values[i];
                             {"\n"} {"}"}
-                            {"\n\n"}{" "}
-                            <span className="text-fuchsia-700">return</span>{" "}
-                            total;
+                            {"\n\n"} <span className="text-fuchsia-700">return</span> total;
                             {"\n"}
                             {"}"};
                           </code>
@@ -228,9 +201,7 @@ const HomePage = () => {
                         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
                           Latest run
                         </p>
-                        <p className="mt-1 text-lg font-semibold text-zinc-950">
-                          Array sum
-                        </p>
+                        <p className="mt-1 text-lg font-semibold text-zinc-950">Array sum</p>
                       </div>
                       <div className="flex size-9 items-center justify-center rounded-full bg-yellow-400 text-zinc-950 shadow-lg shadow-yellow-400/20">
                         <Play className="size-4 fill-current" />
@@ -241,25 +212,17 @@ const HomePage = () => {
                       {BENCHMARK_RESULTS.map((result) => (
                         <div key={result.name}>
                           <div className="mb-2 flex items-center justify-between gap-4 text-xs">
-                            <span
-                              className={
-                                result.winner
-                                  ? "font-semibold text-zinc-900"
-                                  : "text-zinc-500"
-                              }
-                            >
+                            <span className={result.winner ? "font-semibold text-zinc-900" : "text-zinc-500"}>
                               {result.name}
                             </span>
-                            <span className="font-mono text-zinc-700">
-                              {result.value} ops/s
-                            </span>
+                            <span className="font-mono text-zinc-700">{result.value} ops/s</span>
                           </div>
                           <div className="h-2 overflow-hidden rounded-full bg-zinc-200">
                             <div
                               className={
-                                result.winner
-                                  ? "h-full rounded-full bg-yellow-400"
-                                  : "h-full rounded-full bg-zinc-400"
+                                result.winner ?
+                                  "h-full rounded-full bg-yellow-400"
+                                : "h-full rounded-full bg-zinc-400"
                               }
                               style={{ width: result.width }}
                             />
@@ -270,20 +233,12 @@ const HomePage = () => {
 
                     <div className="mt-8 grid grid-cols-2 gap-2 border-t border-zinc-200 pt-5">
                       <div className="rounded-lg border border-zinc-200 bg-white p-3">
-                        <p className="text-[10px] uppercase tracking-wider text-zinc-500">
-                          Samples
-                        </p>
-                        <p className="mt-1 font-mono text-sm text-zinc-900">
-                          1,248
-                        </p>
+                        <p className="text-[10px] uppercase tracking-wider text-zinc-500">Samples</p>
+                        <p className="mt-1 font-mono text-sm text-zinc-900">1,248</p>
                       </div>
                       <div className="rounded-lg border border-zinc-200 bg-white p-3">
-                        <p className="text-[10px] uppercase tracking-wider text-zinc-500">
-                          Margin
-                        </p>
-                        <p className="mt-1 font-mono text-sm text-emerald-700">
-                          ±0.82%
-                        </p>
+                        <p className="text-[10px] uppercase tracking-wider text-zinc-500">Margin</p>
+                        <p className="mt-1 font-mono text-sm text-emerald-700">±0.82%</p>
                       </div>
                     </div>
                   </div>
@@ -307,15 +262,9 @@ const HomePage = () => {
             <div className="grid gap-8 border-t border-border pt-8 md:grid-cols-3 md:gap-10">
               {PILLARS.map(({ description, number, title }) => (
                 <article key={title}>
-                  <span className="font-mono text-xs font-semibold text-muted-foreground">
-                    {number}
-                  </span>
-                  <h3 className="mt-3 text-lg font-semibold tracking-tight">
-                    {title}
-                  </h3>
-                  <p className="mt-3 max-w-sm leading-7 text-muted-foreground">
-                    {description}
-                  </p>
+                  <span className="font-mono text-xs font-semibold text-muted-foreground">{number}</span>
+                  <h3 className="mt-3 text-lg font-semibold tracking-tight">{title}</h3>
+                  <p className="mt-3 max-w-sm leading-7 text-muted-foreground">{description}</p>
                 </article>
               ))}
             </div>
@@ -336,34 +285,25 @@ const HomePage = () => {
                   </div>
                   <h3 className="text-3xl font-bold tracking-tight">Results</h3>
                   <p className="mt-4 leading-7 text-muted-foreground">
-                    See elapsed time, throughput, sample count, and margin of
-                    error for each implementation.
+                    See elapsed time, throughput, sample count, and margin of error for each implementation.
                   </p>
                 </div>
 
                 <div className="mt-12 grid gap-3 sm:grid-cols-3">
                   <div className="rounded-2xl border border-border bg-background p-4">
                     <Timer className="mb-5 size-5 text-amber-600 dark:text-yellow-400" />
-                    <p className="text-xs text-muted-foreground">
-                      Elapsed time
-                    </p>
-                    <p className="mt-1 font-mono text-xl font-semibold">
-                      2.41s
-                    </p>
+                    <p className="text-xs text-muted-foreground">Elapsed time</p>
+                    <p className="mt-1 font-mono text-xl font-semibold">2.41s</p>
                   </div>
                   <div className="rounded-2xl border border-border bg-background p-4">
                     <Gauge className="mb-5 size-5 text-amber-600 dark:text-yellow-400" />
                     <p className="text-xs text-muted-foreground">Throughput</p>
-                    <p className="mt-1 font-mono text-xl font-semibold">
-                      8.24M
-                    </p>
+                    <p className="mt-1 font-mono text-xl font-semibold">8.24M</p>
                   </div>
                   <div className="rounded-2xl border border-border bg-background p-4">
                     <Sparkles className="mb-5 size-5 text-amber-600 dark:text-yellow-400" />
                     <p className="text-xs text-muted-foreground">Confidence</p>
-                    <p className="mt-1 font-mono text-xl font-semibold">
-                      ±0.82%
-                    </p>
+                    <p className="mt-1 font-mono text-xl font-semibold">±0.82%</p>
                   </div>
                 </div>
               </article>
@@ -372,31 +312,24 @@ const HomePage = () => {
                 <div className="flex size-11 items-center justify-center rounded-xl border border-border bg-background">
                   <PackagePlus className="size-5" />
                 </div>
-                <h3 className="mt-8 text-2xl font-bold tracking-tight">
-                  ESM dependencies
-                </h3>
+                <h3 className="mt-8 text-2xl font-bold tracking-tight">ESM dependencies</h3>
                 <p className="mt-4 leading-7 text-muted-foreground">
-                  Add packages through esm.sh, then import them in setup or
-                  implementation files.
+                  Add packages through esm.sh, then import them in setup or implementation files.
                 </p>
                 <div className="mt-10 overflow-hidden rounded-2xl border border-border bg-background shadow-sm">
                   <div className="flex items-center justify-between border-b border-border px-4 py-3 text-xs text-muted-foreground">
                     <span>Dependencies</span>
                     <span>esm.sh</span>
                   </div>
-                  {["lodash-es", "date-fns", "es-toolkit"].map(
-                    (dependency, index) => (
-                      <div
-                        className={`flex items-center justify-between px-4 py-3 font-mono text-xs ${index > 0 ? "border-t border-border" : ""}`}
-                        key={dependency}
-                      >
-                        <span>{dependency}</span>
-                        <span className="text-emerald-600 dark:text-emerald-400">
-                          ready
-                        </span>
-                      </div>
-                    ),
-                  )}
+                  {["lodash-es", "date-fns", "es-toolkit"].map((dependency, index) => (
+                    <div
+                      key={dependency}
+                      className={`flex items-center justify-between px-4 py-3 font-mono text-xs ${index > 0 ? "border-t border-border" : ""}`}
+                    >
+                      <span>{dependency}</span>
+                      <span className="text-emerald-600 dark:text-emerald-400">ready</span>
+                    </div>
+                  ))}
                 </div>
               </article>
 
@@ -404,12 +337,9 @@ const HomePage = () => {
                 <div className="flex size-11 items-center justify-center rounded-xl border border-border bg-background">
                   <Zap className="size-5" />
                 </div>
-                <h3 className="mt-8 text-2xl font-bold tracking-tight">
-                  Browser workspace
-                </h3>
+                <h3 className="mt-8 text-2xl font-bold tracking-tight">Browser workspace</h3>
                 <p className="mt-4 leading-7 text-muted-foreground">
-                  Benchmarks run in the browser without an account or local
-                  install.
+                  Benchmarks run in the browser without an account or local install.
                 </p>
               </article>
 
@@ -417,12 +347,9 @@ const HomePage = () => {
                 <div className="flex size-11 items-center justify-center rounded-xl border border-border bg-background">
                   <Share2 className="size-5" />
                 </div>
-                <h3 className="mt-8 max-w-lg text-2xl font-bold tracking-tight">
-                  Share and export
-                </h3>
+                <h3 className="mt-8 max-w-lg text-2xl font-bold tracking-tight">Share and export</h3>
                 <p className="mt-4 max-w-xl leading-7 text-muted-foreground">
-                  Copy a link to the benchmark, or copy or download the
-                  comparison as an image.
+                  Copy a link to the benchmark, or copy or download the comparison as an image.
                 </p>
               </article>
             </div>
@@ -442,16 +369,8 @@ const HomePage = () => {
                 </p>
               </div>
             </div>
-            <Button
-              asChild
-              className="w-fit rounded-full px-5"
-              variant="outline"
-            >
-              <a
-                href="https://github.com/3rd/benchjs"
-                rel="noopener noreferrer"
-                target="_blank"
-              >
+            <Button className="w-fit rounded-full px-5" variant="outline" asChild>
+              <a href="https://github.com/3rd/benchjs" rel="noopener noreferrer" target="_blank">
                 GitHub
                 <ArrowUpRight />
               </a>

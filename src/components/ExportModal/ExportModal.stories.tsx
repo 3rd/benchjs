@@ -33,7 +33,7 @@ const sampleJson = JSON.stringify(
 
 export const Default: Story = {
   args: {
-    open: true,
+    isOpen: true,
     value: sampleJson,
     onOpenChange: () => {},
   },
@@ -41,7 +41,7 @@ export const Default: Story = {
 
 export const Closed: Story = {
   args: {
-    open: false,
+    isOpen: false,
     value: sampleJson,
     onOpenChange: () => {},
   },

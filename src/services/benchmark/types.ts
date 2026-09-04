@@ -20,6 +20,7 @@ export type MainToWorkerMessage = {
 export type ConsoleLevel = "debug" | "error" | "info" | "log" | "warn";
 
 export type WorkerToMainMessage =
+  | { type: "complete"; result: BenchmarkRunResult; crossOriginIsolated: boolean }
   | {
       type: "consoleBatch";
       runId: string;
@@ -29,23 +30,22 @@ export type WorkerToMainMessage =
         count: number;
       }[];
     }
+  | { type: "error"; runId: string; error: string }
+  | { type: "evidenceStatus"; runId: string; status: EvidenceStatus; reasons: string[] }
+  | { type: "phase"; runId: string; phase: BenchmarkPhase }
   | {
       type: "progress";
       runId: string;
       elapsedTime: number;
-      measuredTime: number;
+      // benchmate pools these two over measurement-phase blocks for stats.operationsPerSecond
+      measurementOperations: number;
+      measurementElapsedMs: number;
       timePerOp: number;
-      iterationsCompleted: number;
-      totalIterations: number;
       // null while warmup/pilot collect evidence (no known final count); the
       // measurement phase reports its locked physical block fraction
       measurementFraction: number | null;
       phase?: BenchmarkPhase;
     }
-  | { type: "complete"; result: BenchmarkRunResult; crossOriginIsolated: boolean }
-  | { type: "error"; runId: string; error: string }
-  | { type: "evidenceStatus"; runId: string; status: EvidenceStatus; reasons: string[] }
-  | { type: "phase"; runId: string; phase: BenchmarkPhase }
   | { type: "setup"; runId: string }
   | { type: "taskComplete"; runId: string; elapsedTime: number }
   | { type: "taskStart"; runId: string }

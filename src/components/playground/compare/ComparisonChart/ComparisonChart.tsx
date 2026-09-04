@@ -15,6 +15,8 @@ import { BenchmarkRun } from "@/stores/benchmarkStore";
 import { Implementation } from "@/stores/persistentStore";
 import { CHART_COLORS, chartAxisTick, chartTooltipLabelStyle, chartTooltipStyle } from "@/lib/chart-style";
 import { formatCountShort } from "@/lib/formatters";
+import { isRankingEligible } from "@/components/playground/compare/comparison-ranking";
+import { getOpsPerSecond } from "@/components/playground/compare/comparison-rate";
 
 interface ComparisonChartProps {
   implementations: Implementation[];
@@ -25,11 +27,7 @@ export const ComparisonChart = ({ implementations, runs }: ComparisonChartProps)
   const barData = useMemo(() => {
     return implementations.map((item) => {
       const run = runs[item.id]?.at(-1);
-      const isRunning = run?.status === "running" || run?.status === "warmup";
-      const opsPerSec =
-        isRunning && run.completedIterations ?
-          run.completedIterations / (run.elapsedTime / 1000)
-        : run?.result?.stats.operationsPerSecond.average || 0;
+      const opsPerSec = getOpsPerSecond(run);
 
       // call-task intervals are already ops/s bounds
       const interval = run?.status === "completed" ? (run.result?.evidence.interval ?? null) : null;
@@ -47,12 +45,8 @@ export const ComparisonChart = ({ implementations, runs }: ComparisonChartProps)
   }, [implementations, runs]);
 
   const bestValue = Math.max(...barData.map((entry) => entry["Operations/sec"]));
-  // the host guide forbids a fastest marker unless every member has complete evidence
-  const rankable = implementations.every((item) => {
-    const run = runs[item.id]?.at(-1);
-    return !run || (run.status === "completed" && run.result?.evidence.status === "complete");
-  });
-  const highlightBest = rankable && barData.length > 1 && bestValue > 0;
+  const rankable = isRankingEligible(implementations.map((item) => ({ run: runs[item.id]?.at(-1) })));
+  const highlightBest = rankable && bestValue > 0;
 
   if (barData.every((entry) => entry["Operations/sec"] <= 0)) {
     return (

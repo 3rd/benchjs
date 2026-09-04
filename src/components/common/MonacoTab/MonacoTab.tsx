@@ -31,7 +31,7 @@ export const MonacoTab = ({
   onClick,
 }: TabProps) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: tab.name,
+    id: tab.id,
     transition: {
       duration: 150,
       easing: "cubic-bezier(0.25, 1, 0.5, 1)",

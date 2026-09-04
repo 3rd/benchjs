@@ -155,7 +155,7 @@ export const CompareView = () => {
         </motion.div>
       </AnimatePresence>
 
-      <ExportModal open={showExportModal} value={exportData} onOpenChange={setShowExportModal} />
+      <ExportModal isOpen={showExportModal} value={exportData} onOpenChange={setShowExportModal} />
     </div>
   );
 };

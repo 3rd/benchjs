@@ -20,6 +20,7 @@ interface DependenciesState {
   dependencyMap: Record<string, Dependency>;
   setDependency: (dependency: Dependency) => void;
   updateDependency: (dependencyName: string, data: Partial<Omit<Dependency, "name">>) => void;
+  removeDependency: (dependencyName: string) => void;
   reset: () => void;
 }
 
@@ -49,6 +50,13 @@ export const useDependenciesStore = create<DependenciesState>()(
             },
           };
         });
+      },
+      removeDependency: (dependencyName) => {
+        set((state) => ({
+          dependencyMap: Object.fromEntries(
+            Object.entries(state.dependencyMap).filter(([name]) => name !== dependencyName),
+          ),
+        }));
       },
       reset: () => {
         set({ dependencyMap: {} });

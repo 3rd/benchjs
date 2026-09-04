@@ -1,4 +1,5 @@
-import { ReactNode, useState } from "react";
+import { memo, useState } from "react";
+import type { ReactNode } from "react";
 import {
   ChevronsDownIcon,
   ChevronsLeftIcon,
@@ -13,7 +14,6 @@ import {
 import { useShallow } from "zustand/shallow";
 import { useLatestRunForImplementation } from "@/stores/benchmarkStore";
 import { useBenchmarkStore } from "@/stores/benchmarkStore";
-import { Implementation } from "@/stores/persistentStore";
 import { cn } from "@/lib/utils";
 import { RunTab } from "@/components/playground/code/RunPanel/tabs/RunTab";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,7 @@ interface RunPanelHeaderProps {
   children?: ReactNode;
   isRunning?: boolean;
   layout?: "horizontal" | "vertical";
-  collapsed?: boolean;
+  isCollapsed?: boolean;
   onTabChange: (tab: string) => void;
   onLayoutChange?: () => void;
   onToggleCollapse?: () => void;
@@ -38,16 +38,16 @@ export const RunPanelTabs = ({
   children,
   isRunning,
   layout,
-  collapsed,
+  isCollapsed,
   onTabChange,
   onLayoutChange,
   onToggleCollapse,
 }: RunPanelHeaderProps) => {
-  const isVerticalCollapsed = collapsed && layout === "horizontal";
+  const isVerticalCollapsed = isCollapsed && layout === "horizontal";
 
   return (
     <Tabs
-      className={cn("overflow-hidden", !collapsed && "h-full")}
+      className={cn("overflow-hidden", !isCollapsed && "h-full")}
       value={activeTab}
       onValueChange={onTabChange}
     >
@@ -92,7 +92,7 @@ export const RunPanelTabs = ({
           {onLayoutChange && (
             <Button
               size="icon"
-              tooltip={`Switch to ${layout === "horizontal" ? "horizontal" : "vertical"} layout`}
+              tooltip={`Switch to ${layout === "horizontal" ? "vertical" : "horizontal"} layout`}
               variant="ghost"
               onClick={onLayoutChange}
             >
@@ -103,14 +103,14 @@ export const RunPanelTabs = ({
           )}
           <Button
             size="icon"
-            tooltip={`${collapsed ? "Expand" : "Collapse"}`}
+            tooltip={`${isCollapsed ? "Expand" : "Collapse"}`}
             variant="ghost"
             onClick={onToggleCollapse}
           >
-            {collapsed && layout === "horizontal" && <ChevronsLeftIcon />}
-            {!collapsed && layout === "horizontal" && <ChevronsRightIcon />}
-            {collapsed && layout === "vertical" && <ChevronsUpIcon />}
-            {!collapsed && layout === "vertical" && <ChevronsDownIcon />}
+            {isCollapsed && layout === "horizontal" && <ChevronsLeftIcon />}
+            {!isCollapsed && layout === "horizontal" && <ChevronsRightIcon />}
+            {isCollapsed && layout === "vertical" && <ChevronsUpIcon />}
+            {!isCollapsed && layout === "vertical" && <ChevronsDownIcon />}
           </Button>
         </div>
       </TabsList>
@@ -120,7 +120,7 @@ export const RunPanelTabs = ({
 };
 
 interface RunPanelProps {
-  implementation: Implementation;
+  implementationId: string;
   onRun?: () => void;
   onStop?: () => void;
   layout?: "horizontal" | "vertical";
@@ -130,8 +130,8 @@ interface RunPanelProps {
   onTabChange?: (tab: RunPanelTab) => void;
 }
 
-export const RunPanel = ({
-  implementation,
+const RunPanelComponent = ({
+  implementationId,
   onRun,
   onStop,
   layout,
@@ -140,7 +140,7 @@ export const RunPanel = ({
   activeTab: externalActiveTab,
   onTabChange: externalOnTabChange,
 }: RunPanelProps) => {
-  const latestRun = useLatestRunForImplementation(implementation.id);
+  const latestRun = useLatestRunForImplementation(implementationId);
   const chartData = useBenchmarkStore(
     useShallow((state) => (latestRun ? state.chartData[latestRun.id] || [] : [])),
   );
@@ -151,7 +151,9 @@ export const RunPanel = ({
     })),
   );
   const consoleLogs = useBenchmarkStore((state) => (latestRun ? state.consoleLogs[latestRun.id] : null));
-  const runInfo = useBenchmarkStore((state) => (latestRun ? (state.runInfoByRunId[latestRun.id] ?? null) : null));
+  const runInfo = useBenchmarkStore((state) =>
+    latestRun ? (state.runInfoByRunId[latestRun.id] ?? null) : null,
+  );
 
   const [internalActiveTab, setInternalActiveTab] = useState<RunPanelTab>("run");
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -188,7 +190,7 @@ export const RunPanel = ({
       >
         <div className="overflow-y-auto h-full pb-2">
           {/* forceMount keeps the chart mounted across tab switches; remounting recharts is slow */}
-          <TabsContent className="m-0 data-[state=inactive]:hidden" forceMount value="run">
+          <TabsContent className="m-0 data-[state=inactive]:hidden" value="run" forceMount>
             <RunTab
               chartData={chartData}
               clearChartData={clearChartData}
@@ -200,7 +202,7 @@ export const RunPanel = ({
             />
           </TabsContent>
 
-          <TabsContent className="m-0 data-[state=inactive]:hidden" forceMount value="console">
+          <TabsContent className="m-0 data-[state=inactive]:hidden" value="console" forceMount>
             <ConsoleTab logs={consoleLogs} />
           </TabsContent>
         </div>
@@ -208,3 +210,5 @@ export const RunPanel = ({
     </>
   );
 };
+
+export const RunPanel = memo(RunPanelComponent);

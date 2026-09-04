@@ -1,16 +1,18 @@
 import * as semver from "semver";
+import { parsePackageSpec } from "@/services/dependencies/DependencyService";
 
 export interface PackageSuggestion {
   name: string;
   packageName: string;
   version: string;
+  label: string;
   description?: string;
   monthlyDownloads?: number;
   license?: string;
 }
 
 interface NpmSearchResponse {
-  objects: Array<{
+  objects: {
     package: {
       name: string;
       version: string;
@@ -26,7 +28,7 @@ interface NpmSearchResponse {
         maintenance: number;
       };
     };
-  }>;
+  }[];
   total: number;
 }
 
@@ -45,12 +47,12 @@ interface NpmPackageMetadata {
       version: string;
       description?: string;
       license?: string;
-      licenses?: Array<{ type: string; url: string }>;
+      licenses?: { type: string; url: string }[];
       [key: string]: unknown;
     }
   >;
   license?: string;
-  licenses?: Array<{ type: string; url: string }>;
+  licenses?: { type: string; url: string }[];
 }
 
 interface NpmPackageVersion {
@@ -58,7 +60,7 @@ interface NpmPackageVersion {
   version: string;
   description?: string;
   license?: string;
-  licenses?: Array<{ type: string; url: string }>;
+  licenses?: { type: string; url: string }[];
   [key: string]: unknown;
 }
 
@@ -78,7 +80,8 @@ async function fetchPackageVersions(packageName: string, signal?: AbortSignal): 
       signal,
     });
     if (!packageResponse.ok) {
-      return [];
+      const responseFailure = packageResponse.statusText || `HTTP ${packageResponse.status}`;
+      throw new Error(`npm registry version lookup failed: ${responseFailure}`);
     }
 
     const packageData: NpmPackageMetadata = await packageResponse.json();
@@ -108,6 +111,7 @@ async function fetchPackageVersions(packageName: string, signal?: AbortSignal): 
         name: `${packageName}@${versionString}`,
         packageName: packageData.name,
         version: versionString,
+        label: versionString,
         description: versionData.description || packageData.description,
         license: extractLicense(versionData) || packageLicense,
       };
@@ -116,110 +120,17 @@ async function fetchPackageVersions(packageName: string, signal?: AbortSignal): 
     if (error instanceof DOMException && error.name === "AbortError") {
       return [];
     }
-    return [];
+    throw new Error(
+      `Failed to fetch npm package versions: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
-export async function searchNpmPackages(
-  query: string,
-  limit = 10,
-  signal?: AbortSignal,
-): Promise<PackageSuggestion[]> {
-  if (!query || query.trim().length < 2) {
-    return [];
-  }
-
-  const trimmedQuery = query.trim();
-  const atIndex = trimmedQuery.indexOf("@");
-
-  if (atIndex > 0 && atIndex === trimmedQuery.length - 1) {
-    const packageName = trimmedQuery.substring(0, atIndex).trim();
-    if (packageName.length >= 2) {
-      return await fetchPackageVersions(packageName, signal);
-    }
-  }
-
-  if (atIndex > 0 && atIndex < trimmedQuery.length - 1) {
-    const packageName = trimmedQuery.substring(0, atIndex).trim();
-    const versionSpec = trimmedQuery.substring(atIndex + 1).trim();
-
-    if (packageName.length >= 2 && versionSpec.length > 0) {
-      try {
-        const packageResponse = await fetch(`https://registry.npmjs.org/${encodeURIComponent(packageName)}`, {
-          signal,
-        });
-        if (!packageResponse.ok) {
-          return await performRegularSearch(trimmedQuery, limit, signal);
-        }
-
-        const packageData: NpmPackageMetadata = await packageResponse.json();
-        const versions = packageData.versions || {};
-        const distTags = packageData["dist-tags"] || {};
-
-        let resolvedVersion: string | null = null;
-
-        if (versionSpec === "latest" || versionSpec === "") {
-          resolvedVersion = distTags.latest || Object.keys(versions).pop() || null;
-        } else if (distTags[versionSpec]) {
-          resolvedVersion = distTags[versionSpec];
-        } else if (versions[versionSpec]) {
-          resolvedVersion = versionSpec;
-        } else {
-          const versionKeys = Object.keys(versions).sort((a, b) => {
-            try {
-              return semver.compare(b, a);
-            } catch {
-              return b.localeCompare(a);
-            }
-          });
-
-          resolvedVersion =
-            semver.maxSatisfying(versionKeys, versionSpec) ||
-            versionKeys.find((v) => v.startsWith(versionSpec)) ||
-            versionKeys[0] ||
-            null;
-        }
-
-        if (!resolvedVersion || !versions[resolvedVersion]) {
-          return await performRegularSearch(trimmedQuery, limit, signal);
-        }
-
-        const versionResponse = await fetch(
-          `https://registry.npmjs.org/${encodeURIComponent(packageName)}/${encodeURIComponent(resolvedVersion)}`,
-          { signal },
-        );
-        if (!versionResponse.ok) {
-          return await performRegularSearch(trimmedQuery, limit, signal);
-        }
-
-        const versionData: NpmPackageVersion = await versionResponse.json();
-
-        return [
-          {
-            name: `${packageName}@${resolvedVersion}`,
-            packageName: versionData.name,
-            version: resolvedVersion,
-            description: versionData.description,
-            license: extractLicense(versionData),
-          },
-        ];
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return [];
-        }
-        return await performRegularSearch(trimmedQuery, limit, signal);
-      }
-    }
-  }
-
-  return await performRegularSearch(trimmedQuery, limit, signal);
-}
-
-async function performRegularSearch(
+const performRegularSearch = async (
   query: string,
   limit: number,
   signal?: AbortSignal,
-): Promise<PackageSuggestion[]> {
+): Promise<PackageSuggestion[]> => {
   const searchQuery = encodeURIComponent(query);
   const url = `https://registry.npmjs.org/-/v1/search?text=${searchQuery}&size=${limit}`;
 
@@ -235,6 +146,7 @@ async function performRegularSearch(
       name: obj.package.name,
       packageName: obj.package.name,
       version: obj.package.version,
+      label: obj.package.name,
       description: obj.package.description,
       license: obj.package.license,
     }));
@@ -246,4 +158,95 @@ async function performRegularSearch(
       `Failed to search npm packages: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+};
+
+export async function searchNpmPackages(
+  query: string,
+  limit = 10,
+  signal?: AbortSignal,
+): Promise<PackageSuggestion[]> {
+  if (!query || query.trim().length < 2) {
+    return [];
+  }
+
+  const trimmedQuery = query.trim();
+  const { packageName: parsedPackageName, versionSpec: parsedVersionSpec } = parsePackageSpec(trimmedQuery);
+  const packageName = parsedPackageName.trim();
+  const versionSpec = parsedVersionSpec?.trim() ?? null;
+
+  if (versionSpec === "" && packageName.length >= 2) {
+    return fetchPackageVersions(packageName, signal);
+  }
+
+  if (versionSpec !== null && packageName.length >= 2 && versionSpec.length > 0) {
+    try {
+      const packageResponse = await fetch(`https://registry.npmjs.org/${encodeURIComponent(packageName)}`, {
+        signal,
+      });
+      if (!packageResponse.ok) {
+        return await performRegularSearch(trimmedQuery, limit, signal);
+      }
+
+      const packageData: NpmPackageMetadata = await packageResponse.json();
+      const versions = packageData.versions || {};
+      const distTags = packageData["dist-tags"] || {};
+
+      let resolvedVersion: string | null = null;
+
+      if (versionSpec === "latest") {
+        resolvedVersion = distTags.latest || Object.keys(versions).pop() || null;
+      } else if (distTags[versionSpec]) {
+        resolvedVersion = distTags[versionSpec];
+      } else if (versions[versionSpec]) {
+        resolvedVersion = versionSpec;
+      } else {
+        const versionKeys = Object.keys(versions).sort((a, b) => {
+          try {
+            return semver.compare(b, a);
+          } catch {
+            return b.localeCompare(a);
+          }
+        });
+
+        resolvedVersion =
+          semver.maxSatisfying(versionKeys, versionSpec) ||
+          versionKeys.find((v) => v.startsWith(versionSpec)) ||
+          versionKeys[0] ||
+          null;
+      }
+
+      if (!resolvedVersion || !versions[resolvedVersion]) {
+        return await performRegularSearch(trimmedQuery, limit, signal);
+      }
+
+      const versionResponse = await fetch(
+        `https://registry.npmjs.org/${encodeURIComponent(packageName)}/${encodeURIComponent(resolvedVersion)}`,
+        { signal },
+      );
+      if (!versionResponse.ok) {
+        return await performRegularSearch(trimmedQuery, limit, signal);
+      }
+
+      const versionData: NpmPackageVersion = await versionResponse.json();
+      const resolvedPackageSpec = `${packageName}@${resolvedVersion}`;
+
+      return [
+        {
+          name: resolvedPackageSpec,
+          packageName: versionData.name,
+          version: resolvedVersion,
+          label: resolvedPackageSpec,
+          description: versionData.description,
+          license: extractLicense(versionData),
+        },
+      ];
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return [];
+      }
+      return performRegularSearch(trimmedQuery, limit, signal);
+    }
+  }
+
+  return performRegularSearch(trimmedQuery, limit, signal);
 }

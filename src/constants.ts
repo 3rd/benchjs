@@ -1,3 +1,7 @@
+export const README_FILE_ID = "README.md";
+export const SETUP_FILE_ID = "setup.ts";
+export const BUILT_IN_FILE_IDS: ReadonlySet<string> = new Set([README_FILE_ID, SETUP_FILE_ID]);
+
 export const README_CONTENT = `# Quick Start Guide
 
 ## File Structure

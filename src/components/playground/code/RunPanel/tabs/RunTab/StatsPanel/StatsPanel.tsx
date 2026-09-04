@@ -1,9 +1,12 @@
 import type { ReactNode } from "react";
 import type { IntervalEvidence } from "benchmate";
-import type { BenchmarkResult } from "@/services/benchmark/types";
 import type { RunInfo } from "@/stores/benchmarkStore";
+import type { BenchmarkResult } from "@/services/benchmark/types";
 import { formatCount, formatDuration, formatOps } from "@/lib/formatters";
 import { MetricFigure } from "../MetricFigure";
+
+// Benchmate repeats each series-level verdict flag on every block in its phase group.
+const SERIES_FLAGS = new Set(["change-detected", "drift-detected"]);
 
 // call-task intervals are on the inverse scale: lower/upper are operations per second
 const formatOpsInterval = (interval: IntervalEvidence | null) => {
@@ -38,7 +41,9 @@ export const StatsPanel = ({ result, runInfo, wallTimeMs, chart }: StatsPanelPro
       flagCounts.set(flag, (flagCounts.get(flag) ?? 0) + 1);
     }
   }
-  const flagsLabel = [...flagCounts.entries()].map(([flag, count]) => `${flag} ×${count}`).join(", ");
+  const flagsLabel = [...flagCounts.entries()]
+    .map(([flag, count]) => (SERIES_FLAGS.has(flag) ? flag : `${flag} ×${count}`))
+    .join(", ");
 
   const overheadMs = stats.harnessOverhead.perInvocationMs;
 
@@ -61,11 +66,8 @@ export const StatsPanel = ({ result, runInfo, wallTimeMs, chart }: StatsPanelPro
   }
   details.push(
     { label: "Operations", value: formatCount(stats.operations) },
-    { label: "Blocks", value: formatCount(stats.blocks) },
-    {
-      label: "Block size",
-      value: `${formatCount(stats.blocks > 0 ? stats.operations / stats.blocks : 0)} ops`,
-    },
+    { label: "Measured blocks", value: formatCount(stats.blocks) },
+    { label: "Blocks (all phases)", value: formatCount(evidence.observations.length) },
     { label: "Measured time", value: formatDuration(stats.elapsedMs) },
     { label: "Wall time", value: wallTimeMs > 0 ? formatDuration(wallTimeMs) : "-" },
     {
@@ -73,29 +75,35 @@ export const StatsPanel = ({ result, runInfo, wallTimeMs, chart }: StatsPanelPro
       value: wallTimeMs > 0 ? `${((stats.elapsedMs / wallTimeMs) * 100).toFixed(0)}% of wall` : "-",
     },
     {
-      label: "Ops/s range",
+      label: "Per-block ops/s range",
       value: `${formatOps(stats.operationsPerSecond.min)} – ${formatOps(stats.operationsPerSecond.max)}`,
     },
     { label: "Overhead per op", value: formatDuration(overheadMs) },
     {
-      label: "Overhead share",
-      value: mean > 0 ? `${((overheadMs / mean) * 100).toFixed(2)}% (model)` : "-",
+      label: "Mean minus overhead",
+      value: formatDuration(stats.harnessOverhead.modeledRemainderMs.average),
     },
-    { label: "Observations", value: formatCount(evidence.observations.length) },
   );
-  if (interval) {
+  if (interval && interval.effectiveCount !== interval.physicalCount) {
     details.push({
-      label: "Sample size",
-      value: `${interval.physicalCount} / ${interval.effectiveCount} effective`,
+      label: "Effective samples",
+      value: `${formatCount(interval.effectiveCount)} of ${formatCount(interval.physicalCount)}`,
     });
   }
   if (runInfo) {
+    const clockTick = formatDuration(runInfo.clock.minimumPositiveTickMs);
+    const readCostP99 = formatDuration(runInfo.clock.readPairCostMs.p99);
     details.push(
-      { label: "Clock tick", value: formatDuration(runInfo.clock.minimumPositiveTickMs) },
+      { label: "Clock tick", value: clockTick },
       { label: "Zero-delta rate", value: `${(runInfo.clock.zeroDeltaRateX * 100).toFixed(1)}%` },
-      { label: "Read cost p99", value: formatDuration(runInfo.clock.readPairCostMs.p99) },
-      { label: "Isolation", value: runInfo.crossOriginIsolated ? "cross-origin isolated" : "not isolated" },
     );
+    if (readCostP99 !== clockTick) {
+      details.push({ label: "Read cost p99", value: readCostP99 });
+    }
+    details.push({
+      label: "Isolation",
+      value: runInfo.crossOriginIsolated ? "cross-origin isolated" : "not isolated",
+    });
   }
   if (flagsLabel) details.push({ label: "Flags", value: flagsLabel });
 

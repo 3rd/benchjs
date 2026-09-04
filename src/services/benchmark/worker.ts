@@ -81,6 +81,8 @@ interface TaskTracker {
   phase: string | null;
   finishedPhasesMs: number;
   finishedPhasesOps: number;
+  finishedMeasurementMs: number;
+  finishedMeasurementOps: number;
   phaseMs: number;
   phaseOps: number;
   lastUpdateSentAt: number;
@@ -106,6 +108,8 @@ const handleStartRuns = async (
           phase: null,
           finishedPhasesMs: 0,
           finishedPhasesOps: 0,
+          finishedMeasurementMs: 0,
+          finishedMeasurementOps: 0,
           phaseMs: 0,
           phaseOps: 0,
           lastUpdateSentAt: 0,
@@ -154,10 +158,9 @@ const handleStartRuns = async (
           type: "progress",
           runId: progress.task,
           measurementFraction: progress.iterationsCompleted / progress.iterationsTotal,
-          iterationsCompleted: progress.iterationsCompleted,
-          totalIterations: progress.iterationsTotal,
           elapsedTime: now - tracker.startedAt,
-          measuredTime: progress.elapsedTimeMs,
+          measurementOperations: progress.iterationsCompleted,
+          measurementElapsedMs: progress.elapsedTimeMs,
           timePerOp,
           phase: "measurement",
         });
@@ -169,6 +172,10 @@ const handleStartRuns = async (
       if (tracker.phase !== progress.phase || progress.elapsedTimeMs < tracker.phaseMs) {
         tracker.finishedPhasesMs += tracker.phaseMs;
         tracker.finishedPhasesOps += tracker.phaseOps;
+        if (tracker.phase === "measurement") {
+          tracker.finishedMeasurementMs += tracker.phaseMs;
+          tracker.finishedMeasurementOps += tracker.phaseOps;
+        }
         tracker.phase = progress.phase;
       }
       tracker.phaseMs = progress.elapsedTimeMs;
@@ -196,14 +203,16 @@ const handleStartRuns = async (
           progress.physicalBlocksCompleted / progress.physicalBlocksPlanned
         : null;
 
+      const inMeasurement = progress.phase === "measurement";
+
       postMessage({
         type: "progress",
         runId: progress.task,
         measurementFraction,
-        iterationsCompleted: totalOps,
-        totalIterations: 0,
         elapsedTime: now - tracker.startedAt,
-        measuredTime,
+        measurementOperations:
+          tracker.finishedMeasurementOps + (inMeasurement ? progress.operationsCompleted : 0),
+        measurementElapsedMs: tracker.finishedMeasurementMs + (inMeasurement ? progress.elapsedTimeMs : 0),
         timePerOp,
         phase: progress.phase,
       });
@@ -232,14 +241,17 @@ const handleStartRuns = async (
     for (const run of runs) {
       const blob = new Blob([run.processedCode], { type: "text/javascript" });
       const blobUrl = URL.createObjectURL(blob);
-      const module = await import(blobUrl);
-      URL.revokeObjectURL(blobUrl);
-      const benchmarkFn = module.default;
-      if (typeof benchmarkFn !== "function") {
-        log("Invalid benchmark function:", { benchmarkFn, run });
-        throw new TypeError("Benchmark code must return a function");
+      try {
+        const module = await import(/* @vite-ignore */ blobUrl);
+        const benchmarkFn = module.default;
+        if (typeof benchmarkFn !== "function") {
+          log("Invalid benchmark function:", { benchmarkFn, run });
+          throw new TypeError("Benchmark code must return a function");
+        }
+        runner.add(run.runId, benchmarkFn as () => void);
+      } finally {
+        URL.revokeObjectURL(blobUrl);
       }
-      runner.add(run.runId, benchmarkFn as () => void);
     }
 
     // run benchmark and post the complete result without a browser-only shape

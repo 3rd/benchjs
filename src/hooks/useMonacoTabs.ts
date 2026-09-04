@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Implementation } from "@/stores/persistentStore";
+import type { Implementation } from "@/stores/persistentStore";
+import { BUILT_IN_FILE_IDS, README_FILE_ID, SETUP_FILE_ID } from "@/constants";
 import { MonacoTab } from "@/components/common/MonacoTab";
 
 interface UseMonacoTabsOptions {
@@ -9,20 +10,21 @@ interface UseMonacoTabsOptions {
   onTabClose?: (tabId: string) => void;
 }
 
-const defaultTabsIds = new Set(["README.md", "setup.ts"]);
-
-const createInitialTabs = (implementations: Implementation[], activeTabId?: string | null) => {
+const createInitialTabs = (
+  implementations: Pick<Implementation, "filename" | "id">[],
+  activeTabId?: string | null,
+) => {
   const readmeTab: MonacoTab = {
-    id: "README.md",
-    name: "README.md",
+    id: README_FILE_ID,
+    name: README_FILE_ID,
     active: true,
   };
   if (!activeTabId || activeTabId === readmeTab.id) return [readmeTab];
 
-  if (activeTabId === "setup.ts") {
+  if (activeTabId === SETUP_FILE_ID) {
     return [
       { ...readmeTab, active: false },
-      { id: "setup.ts", name: "setup.ts", active: true },
+      { id: SETUP_FILE_ID, name: SETUP_FILE_ID, active: true },
     ];
   }
 
@@ -35,12 +37,25 @@ const createInitialTabs = (implementations: Implementation[], activeTabId?: stri
   ];
 };
 
-export const useMonacoTabs = (implementations: Implementation[], options?: UseMonacoTabsOptions) => {
-  const [tabs, setTabs] = useState<MonacoTab[]>(() => createInitialTabs(implementations, options?.initialActiveTabId));
+export const useMonacoTabs = (
+  implementations: Pick<Implementation, "filename" | "id">[],
+  options?: UseMonacoTabsOptions,
+) => {
+  const [tabs, setTabs] = useState<MonacoTab[]>(() =>
+    createInitialTabs(implementations, options?.initialActiveTabId),
+  );
+  const [renderedSelection, setRenderedSelection] = useState(() => ({
+    documentId: options?.documentId,
+    activeTabId: options?.initialActiveTabId,
+  }));
 
   const changeTab = useCallback(
     (tab: MonacoTab | string) => {
       const tabId = typeof tab === "string" ? tab : tab.id;
+      setRenderedSelection({
+        documentId: options?.documentId,
+        activeTabId: tabId,
+      });
       setTabs((prev) =>
         prev.map((item) => ({
           ...item,
@@ -70,7 +85,7 @@ export const useMonacoTabs = (implementations: Implementation[], options?: UseMo
       options?.onTabClose?.(tab.id);
 
       if (hasNoOpenTabs) {
-        const newTab = { id: "README.md", name: "README.md", active: true };
+        const newTab = { id: README_FILE_ID, name: README_FILE_ID, active: true };
         setTabs((prev) => [...prev.map((item) => ({ ...item, active: false })), newTab]);
         changeTab(newTab);
       } else if (nextActiveTabId) {
@@ -80,53 +95,54 @@ export const useMonacoTabs = (implementations: Implementation[], options?: UseMo
     [changeTab, options],
   );
 
-  const closeOtherTabs = useCallback((targetTab: MonacoTab) => {
-    setTabs((prev) => {
-      const keptTab = prev.find((tab) => tab.id === targetTab.id);
-      if (!keptTab) return prev;
-      return [{ ...keptTab, active: true }];
-    });
-  }, []);
+  const closeOtherTabs = useCallback(
+    (targetTab: MonacoTab) => {
+      const keptTab = tabs.find((tab) => tab.id === targetTab.id);
+      if (!keptTab) return;
 
-  const closeTabsToLeft = useCallback((targetTab: MonacoTab) => {
-    setTabs((prev) => {
-      const targetIndex = prev.findIndex((tab) => tab.id === targetTab.id);
-      if (targetIndex <= 0) return prev;
+      setTabs([keptTab]);
+      changeTab(targetTab);
+    },
+    [changeTab, tabs],
+  );
 
-      return prev.slice(targetIndex).map((tab) => ({
-        ...tab,
-        active: tab.id === targetTab.id,
-      }));
-    });
-  }, []);
+  const closeTabsToLeft = useCallback(
+    (targetTab: MonacoTab) => {
+      const targetIndex = tabs.findIndex((tab) => tab.id === targetTab.id);
+      if (targetIndex <= 0) return;
 
-  const closeTabsToRight = useCallback((targetTab: MonacoTab) => {
-    setTabs((prev) => {
-      const targetIndex = prev.findIndex((tab) => tab.id === targetTab.id);
-      if (targetIndex === -1) return prev;
+      setTabs(tabs.slice(targetIndex));
+      changeTab(targetTab);
+    },
+    [changeTab, tabs],
+  );
 
-      return prev.slice(0, targetIndex + 1).map((tab) => ({
-        ...tab,
-        active: tab.id === targetTab.id,
-      }));
-    });
-  }, []);
+  const closeTabsToRight = useCallback(
+    (targetTab: MonacoTab) => {
+      const targetIndex = tabs.findIndex((tab) => tab.id === targetTab.id);
+      if (targetIndex === -1) return;
+
+      setTabs(tabs.slice(0, targetIndex + 1));
+      changeTab(targetTab);
+    },
+    [changeTab, tabs],
+  );
 
   const openTab = useCallback(
     (tab: MonacoTab | string) => {
       if (typeof tab === "string") {
+        if (tabs.some((item) => item.id === tab)) {
+          changeTab(tab);
+          return;
+        }
+
         setTabs((prev) => prev.map((item) => ({ ...item, active: item.id === tab })));
         return;
       }
 
       const hasTab = tabs.some((item) => item.id === tab.id);
       if (hasTab) {
-        setTabs((prev) => {
-          return prev.map((item) => ({
-            ...item,
-            active: typeof tab === "string" ? item.id === tab : item.id === tab.id,
-          }));
-        });
+        changeTab(tab);
       } else {
         const newTab = { id: tab.id, name: tab.name, active: true };
         setTabs((prev) => [...prev.map((item) => ({ ...item, active: false })), newTab]);
@@ -148,7 +164,7 @@ export const useMonacoTabs = (implementations: Implementation[], options?: UseMo
     setTabs((prev) => {
       // sync names
       const newTabs = prev
-        .filter((tab) => defaultTabsIds.has(tab.id) || implementationNameMap[tab.id] !== undefined)
+        .filter((tab) => BUILT_IN_FILE_IDS.has(tab.id) || implementationNameMap[tab.id] !== undefined)
         .map((item) => ({
           ...item,
           name: implementationNameMap[item.id] ?? item.name,
@@ -156,7 +172,7 @@ export const useMonacoTabs = (implementations: Implementation[], options?: UseMo
 
       // active tab fallback
       if (!newTabs.some((tab) => tab.active)) {
-        const readmeTabIndex = newTabs.findIndex((tab) => tab.id === "README.md");
+        const readmeTabIndex = newTabs.findIndex((tab) => tab.id === README_FILE_ID);
         if (readmeTabIndex !== -1) {
           newTabs[readmeTabIndex] = { ...newTabs[readmeTabIndex], active: true };
         } else if (newTabs.length > 0) {
@@ -168,9 +184,16 @@ export const useMonacoTabs = (implementations: Implementation[], options?: UseMo
     });
   }, [implementations]);
 
-  useEffect(() => {
+  if (
+    renderedSelection.documentId !== options?.documentId ||
+    renderedSelection.activeTabId !== options?.initialActiveTabId
+  ) {
+    setRenderedSelection({
+      documentId: options?.documentId,
+      activeTabId: options?.initialActiveTabId,
+    });
     setTabs(createInitialTabs(implementations, options?.initialActiveTabId));
-  }, [options?.documentId]);
+  }
 
   const activeTabId = tabs.find((item) => item.active)?.id ?? null;
 

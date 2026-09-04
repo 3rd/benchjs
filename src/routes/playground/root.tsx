@@ -1,20 +1,31 @@
-import { useEffect, useRef, useState } from "react";
-import { Route } from ".react-router/types/src/routes/playground/+types/root";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Share2Icon } from "lucide-react";
 import { Link } from "react-router";
-import { BenchmarkRun, useBenchmarkStore } from "@/stores/benchmarkStore";
+import { useShallow } from "zustand/shallow";
+import type { Route } from ".react-router/types/src/routes/playground/+types/root";
+import { useBenchmarkStore } from "@/stores/benchmarkStore";
+import type { BenchmarkRun } from "@/stores/benchmarkStore";
 import {
+  DEFAULT_DOCUMENT_TITLE,
   flushDocumentSaves,
+  flushPendingDocumentSave,
   getCurrentDocument,
-  Implementation,
+  importDocumentFromUrl,
+  useDocumentImportStore,
   usePersistentStore,
+} from "@/stores/persistentStore";
+import type {
+  BenchmarkDocument,
+  Implementation,
 } from "@/stores/persistentStore";
 import { useMonacoTabs } from "@/hooks/useMonacoTabs";
 import { CodeView } from "@/routes/playground/views/code/index";
 import { CompareView } from "@/routes/playground/views/compare";
 import { SettingsView } from "@/routes/playground/views/settings";
+import { benchmarkService } from "@/services/benchmark/benchmark-service";
 import { DependencyService } from "@/services/dependencies/DependencyService";
 import { Header } from "@/components/layout/Header";
+import { DocumentImportDialog } from "@/components/playground/DocumentImportDialog";
 import { DocumentSwitcher } from "@/components/playground/DocumentSwitcher";
 import { ShareDialog } from "@/components/playground/ShareDialog";
 import { Sidebar, SidebarTab } from "@/components/playground/Sidebar";
@@ -24,6 +35,49 @@ type ShareDialogPayload = {
   implementations: Implementation[];
   runs: Record<string, BenchmarkRun[]>;
   shareUrl: string;
+};
+
+const getInvalidatedImplementationIds = (
+  savedDocument: BenchmarkDocument,
+  sharedDocument: BenchmarkDocument,
+) => {
+  const runtimeContextMatches =
+    savedDocument.setupCode === sharedDocument.setupCode &&
+    savedDocument.libraries.length === sharedDocument.libraries.length &&
+    savedDocument.libraries.every(
+      (library, index) =>
+        library.name === sharedDocument.libraries[index]?.name,
+    );
+  const savedImplementations = new Map(
+    savedDocument.implementations.map((implementation) => [
+      implementation.id,
+      implementation,
+    ]),
+  );
+  const sharedImplementations = new Map(
+    sharedDocument.implementations.map((implementation) => [
+      implementation.id,
+      implementation,
+    ]),
+  );
+  const implementationIds = new Set([
+    ...savedImplementations.keys(),
+    ...sharedImplementations.keys(),
+  ]);
+
+  return new Set(
+    [...implementationIds].filter((implementationId) => {
+      const savedImplementation = savedImplementations.get(implementationId);
+      const sharedImplementation = sharedImplementations.get(implementationId);
+      return (
+        !runtimeContextMatches ||
+        !savedImplementation ||
+        !sharedImplementation ||
+        savedImplementation.filename !== sharedImplementation.filename ||
+        savedImplementation.content !== sharedImplementation.content
+      );
+    }),
+  );
 };
 
 // eslint-disable-next-line no-empty-pattern
@@ -39,13 +93,83 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export default function EditorRoute() {
-  const store = usePersistentStore();
-  const currentDocument = getCurrentDocument(store);
-  const monacoTabs = useMonacoTabs(currentDocument.implementations, {
-    documentId: currentDocument.id,
-    initialActiveTabId: currentDocument.activeTabId,
+  const conflictingDocument = useDocumentImportStore(
+    (state) => state.conflictingDocument,
+  );
+  const savedConflictingDocumentTitle = usePersistentStore((state) => {
+    if (!conflictingDocument) return DEFAULT_DOCUMENT_TITLE;
+    return (
+      state.documents.find((document) => document.id === conflictingDocument.id)
+        ?.title ?? DEFAULT_DOCUMENT_TITLE
+    );
+  });
+  const currentDocumentId = usePersistentStore(
+    (state) => state.currentDocumentId,
+  );
+  const currentTitle = usePersistentStore(
+    (state) => getCurrentDocument(state).title,
+  );
+  const initialActiveTabId = usePersistentStore(
+    (state) => getCurrentDocument(state).activeTabId,
+  );
+  const libraries = usePersistentStore(
+    (state) => getCurrentDocument(state).libraries,
+  );
+  const implementationMetadata = usePersistentStore(
+    useShallow((state) =>
+      getCurrentDocument(state).implementations.flatMap((implementation) => [
+        implementation.id,
+        implementation.filename,
+      ]),
+    ),
+  );
+  const documentMetadata = usePersistentStore(
+    useShallow((state) =>
+      state.documents.flatMap((document) => [document.id, document.title]),
+    ),
+  );
+  const implementations = useMemo(() => {
+    const result: Pick<Implementation, "filename" | "id">[] = [];
+    for (let index = 0; index < implementationMetadata.length; index += 2) {
+      const id = implementationMetadata[index];
+      const filename = implementationMetadata[index + 1];
+      if (id === undefined || filename === undefined) continue;
+      result.push({ id, filename });
+    }
+    return result;
+  }, [implementationMetadata]);
+  const documents = useMemo(() => {
+    const result: { id: string; title: string }[] = [];
+    for (let index = 0; index < documentMetadata.length; index += 2) {
+      const id = documentMetadata[index];
+      const title = documentMetadata[index + 1];
+      if (id === undefined || title === undefined) continue;
+      result.push({ id, title });
+    }
+    return result;
+  }, [documentMetadata]);
+  const {
+    setActiveTabId,
+    createDocument,
+    removeDocument,
+    renameDocument,
+    setCurrentDocumentId,
+    resolveDocumentImport,
+  } = usePersistentStore(
+    useShallow((state) => ({
+      setActiveTabId: state.setActiveTabId,
+      createDocument: state.createDocument,
+      removeDocument: state.removeDocument,
+      renameDocument: state.renameDocument,
+      setCurrentDocumentId: state.setCurrentDocumentId,
+      resolveDocumentImport: state.resolveDocumentImport,
+    })),
+  );
+  const monacoTabs = useMonacoTabs(implementations, {
+    documentId: currentDocumentId,
+    initialActiveTabId,
     onTabChange: (tabId: string | null) => {
-      store.setActiveTabId(tabId);
+      setActiveTabId(tabId);
     },
   });
   const [activeTab, setActiveTab] = useState<SidebarTab>("code");
@@ -62,12 +186,38 @@ export default function EditorRoute() {
     });
   };
 
+  const handleOverwriteDocument = () => {
+    if (!conflictingDocument) return;
+
+    const savedDocument = usePersistentStore
+      .getState()
+      .documents.find((document) => document.id === conflictingDocument.id);
+    if (savedDocument) {
+      benchmarkService.discardRunsForImplementations(
+        getInvalidatedImplementationIds(savedDocument, conflictingDocument),
+      );
+    }
+    resolveDocumentImport("overwrite");
+  };
+
   const dependencyService = useRef(new DependencyService());
   useEffect(() => {
-    for (const library of currentDocument.libraries) {
-      dependencyService.current.addLibrary({ name: library.name });
-    }
-  }, [currentDocument.libraries]);
+    dependencyService.current.syncLibraries(libraries);
+  }, [libraries]);
+  useEffect(() => {
+    const service = dependencyService.current;
+    return () => service.dispose();
+  }, []);
+  useEffect(() => benchmarkService.dispose, []);
+  useEffect(() => {
+    window.addEventListener("hashchange", importDocumentFromUrl);
+    return () =>
+      window.removeEventListener("hashchange", importDocumentFromUrl);
+  }, []);
+  useEffect(() => {
+    window.addEventListener("blur", flushPendingDocumentSave);
+    return () => window.removeEventListener("blur", flushPendingDocumentSave);
+  }, []);
 
   return (
     <div className="flex flex-col h-screen">
@@ -75,13 +225,13 @@ export default function EditorRoute() {
         className="static"
         postLogoElement={
           <DocumentSwitcher
-            currentDocumentId={store.currentDocumentId}
-            currentTitle={currentDocument.title}
-            documents={store.documents}
-            onCreate={store.createDocument}
-            onDelete={store.removeDocument}
-            onRename={store.renameDocument}
-            onSelect={store.setCurrentDocumentId}
+            currentDocumentId={currentDocumentId}
+            currentTitle={currentTitle}
+            documents={documents}
+            onCreate={createDocument}
+            onDelete={removeDocument}
+            onRename={renameDocument}
+            onSelect={setCurrentDocumentId}
           />
         }
         customNav={
@@ -98,12 +248,14 @@ export default function EditorRoute() {
           {activeTab === "code" && (
             <CodeView
               dependencyService={dependencyService.current}
-              documentId={currentDocument.id}
+              documentId={currentDocumentId}
               monacoTabs={monacoTabs}
             />
           )}
           {activeTab === "compare" && <CompareView />}
-          {activeTab === "settings" && <SettingsView dependencyService={dependencyService.current} />}
+          {activeTab === "settings" && (
+            <SettingsView dependencyService={dependencyService.current} />
+          )}
         </div>
       </div>
 
@@ -115,12 +267,24 @@ export default function EditorRoute() {
         onOpenChange={(open) => setShareData(open ? shareData : null)}
       />
 
+      <DocumentImportDialog
+        open={Boolean(conflictingDocument)}
+        savedDocumentTitle={savedConflictingDocumentTitle}
+        sharedDocumentTitle={
+          conflictingDocument?.title ?? DEFAULT_DOCUMENT_TITLE
+        }
+        onMakeCopy={() => resolveDocumentImport("copy")}
+        onOverwrite={handleOverwriteDocument}
+      />
+
       <div className="flex fixed top-0 right-0 bottom-0 left-0 z-50 justify-center items-center p-4 w-full h-full sm:hidden bg-black/50 backdrop-blur-sm dark:bg-black/80">
         <div className="flex flex-col gap-4 justify-center items-center p-4 py-8 text-center bg-card border-2 border-border rounded-lg">
-          <h1 className="mb-4 text-2xl font-bold">Mobile is not supported 🫠</h1>
+          <h1 className="mb-4 text-2xl font-bold">
+            Mobile is not supported 🫠
+          </h1>
           <p>
-            The playground includes a code editor and many tabs, and it&apos;s not a good experience on
-            mobile, please use a desktop browser.
+            The playground includes a code editor and many tabs, and it&apos;s
+            not a good experience on mobile, please use a desktop browser.
           </p>
           <Link to="/">
             <Button variant="outline">Go back</Button>

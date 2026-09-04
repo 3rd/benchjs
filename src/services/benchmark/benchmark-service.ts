@@ -3,28 +3,93 @@ import { nanoid } from "nanoid";
 import { serializeError } from "serialize-error";
 import { useBenchmarkStore } from "@/stores/benchmarkStore";
 import { getCurrentDocument, Implementation, usePersistentStore } from "@/stores/persistentStore";
-import { benchmark, features } from "@/config";
+import { features } from "@/config";
 import { bundleBenchmarkCode } from "../code-processor/bundle-benchmark-code";
 import { BenchmarkResult, WorkerToMainMessage } from "./types";
 import BenchmarkWorker from "./worker?worker";
 
-let worker: Worker | null = null;
-let activeCleanup: (() => void) | null = null;
+interface BenchmarkSession {
+  runIds: Set<string>;
+  worker: Worker | null;
+  cleanup: () => void;
+  settled: boolean;
+  settle: (outcome: BenchmarkSessionOutcome) => void;
+}
+
+type BenchmarkSessionOutcome =
+  | { type: "reject"; error: unknown }
+  | { type: "resolve"; results: BenchmarkResult[] };
+
+let activeSession: BenchmarkSession | null = null;
+
+const isActiveSession = (session: BenchmarkSession) => {
+  return activeSession === session && !session.settled;
+};
+
+const createSession = (input: {
+  runIds: Set<string>;
+  cleanup: () => void;
+  resolve: (results: BenchmarkResult[]) => void;
+  reject: (error: unknown) => void;
+}): BenchmarkSession => {
+  const session: BenchmarkSession = {
+    runIds: input.runIds,
+    worker: null,
+    cleanup: input.cleanup,
+    settled: false,
+    settle: (outcome) => {
+      if (session.settled) return;
+      session.settled = true;
+      if (session.worker) {
+        session.worker.terminate();
+        session.worker = null;
+      }
+      session.cleanup();
+      if (activeSession === session) activeSession = null;
+
+      if (outcome.type === "resolve") input.resolve(outcome.results);
+      else input.reject(outcome.error);
+    },
+  };
+  return session;
+};
+
+const cancelSession = (session: BenchmarkSession) => {
+  useBenchmarkStore.getState().terminalizeRuns(session.runIds, "cancelled", null);
+  session.settle({ type: "resolve", results: [] });
+};
 
 const stopBenchmark = (runId: string): void => {
-  const store = useBenchmarkStore.getState();
-  if (worker) {
-    worker.terminate();
-    worker = null;
+  if (activeSession) {
+    cancelSession(activeSession);
+    return;
   }
-  activeCleanup?.();
-  activeCleanup = null;
 
-  store.updateRun(runId, {
-    status: "cancelled",
-    progress: null,
-    error: null,
-  });
+  useBenchmarkStore.getState().terminalizeRuns(new Set([runId]), "cancelled", null);
+};
+
+const dispose = () => {
+  if (activeSession) cancelSession(activeSession);
+};
+
+const discardRunsForImplementations = (
+  implementationIds: ReadonlySet<string>,
+) => {
+  const store = useBenchmarkStore.getState();
+  const discardedRunIds = new Set(
+    [...implementationIds].flatMap((implementationId) =>
+      (store.runs[implementationId] ?? []).map((run) => run.id),
+    ),
+  );
+
+  if (
+    activeSession &&
+    [...activeSession.runIds].some((runId) => discardedRunIds.has(runId))
+  ) {
+    cancelSession(activeSession);
+  }
+
+  store.discardRunsForImplementations(implementationIds);
 };
 
 const getMemoryUsage = async () => {
@@ -80,40 +145,51 @@ export const benchmarkService = {
         if (heartbeat) clearInterval(heartbeat);
       };
 
-      try {
-        const store = useBenchmarkStore.getState();
-        const totalIterations =
-          runnerOptions && typeof runnerOptions.iterations === "number" ? runnerOptions.iterations : 0;
+      const store = useBenchmarkStore.getState();
+      const runs = implementations.map((implementation) => ({
+        id: nanoid(),
+        implementationId: implementation.id,
+        createdAt: Date.now(),
+        warmupStartedAt: null,
+        warmupEndedAt: null,
+        status: "running" as const,
+        filename: implementation.filename,
+        originalCode: implementation.content,
+        processedCode: "",
+        progress: null,
+        elapsedTime: 0,
+        measurementOperations: 0,
+        measurementElapsedMs: 0,
+        error: null,
+        result: null,
+      }));
+      const session = createSession({
+        runIds: new Set(runs.map((run) => run.id)),
+        cleanup: teardown,
+        resolve,
+        reject,
+      });
 
-        // create runs
-        const runs = implementations.map((implementation) => ({
-          id: nanoid(),
-          implementationId: implementation.id,
-          createdAt: Date.now(),
-          warmupStartedAt: null,
-          warmupEndedAt: null,
-          status: "running" as const,
-          filename: implementation.filename,
-          originalCode: implementation.content,
-          processedCode: "",
-          progress: null,
-          elapsedTime: 0,
-          completedIterations: 0,
-          totalIterations,
-          error: null,
-          result: null,
-        }));
+      if (activeSession) cancelSession(activeSession);
+      activeSession = session;
+
+      try {
         store.addRuns(runs);
 
         // pre-processing
         const processedRuns = await Promise.all(
           runs.map(async (run) => {
+            const unprocessedRun = {
+              runId: run.id,
+              processedCode: "",
+              success: false,
+            };
+
             try {
-              const processedCode = await bundleBenchmarkCode(
-                run.originalCode,
-                setupCode,
-                libraries,
-              );
+              const processedCode = await bundleBenchmarkCode(run.originalCode, setupCode, libraries);
+              if (!isActiveSession(session)) {
+                return unprocessedRun;
+              }
               store.updateRun(run.id, {
                 processedCode,
               });
@@ -123,19 +199,19 @@ export const benchmarkService = {
                 success: true,
               };
             } catch (error) {
+              if (!isActiveSession(session)) {
+                return unprocessedRun;
+              }
+              const errorMessage = serializeError(error).message;
               store.updateRun(run.id, {
                 status: "failed",
-                error: serializeError(error).message || "Failed to process code",
+                error: errorMessage || "Failed to process code",
               });
-              return {
-                runId: run.id,
-                processedCode: "",
-                success: false,
-                error: serializeError(error).message,
-              };
+              return unprocessedRun;
             }
           }),
         );
+        if (!isActiveSession(session)) return;
 
         // bail if any pre-processing failed
         const hasProcessingError = processedRuns.some((r) => !r.success);
@@ -147,15 +223,16 @@ export const benchmarkService = {
               error: "Cancelled due to errors in other implementations",
             });
           }
-          reject(new Error("Failed to process one or more implementations"));
+          session.settle({
+            type: "reject",
+            error: new Error("Failed to process one or more implementations"),
+          });
           return;
         }
 
         // setup worker
-        if (worker) worker.terminate();
-        activeCleanup?.();
-        activeCleanup = teardown;
-        worker = new BenchmarkWorker();
+        const sessionWorker = new BenchmarkWorker();
+        session.worker = sessionWorker;
         document.addEventListener("visibilitychange", handleVisibilityChange);
         heartbeat = setInterval(() => {
           const now = Date.now();
@@ -165,7 +242,8 @@ export const benchmarkService = {
           }
         }, 200);
 
-        worker.addEventListener("message", (event: MessageEvent<WorkerToMainMessage>) => {
+        sessionWorker.addEventListener("message", (event: MessageEvent<WorkerToMainMessage>) => {
+          if (!isActiveSession(session)) return;
           const message = event.data;
 
           switch (message.type) {
@@ -199,17 +277,15 @@ export const benchmarkService = {
               store.updateRun(message.runId, {
                 progress: message.measurementFraction === null ? null : message.measurementFraction * 100,
                 elapsedTime: message.elapsedTime,
-                completedIterations: message.iterationsCompleted,
-                totalIterations: message.totalIterations,
+                measurementOperations: message.measurementOperations,
+                measurementElapsedMs: message.measurementElapsedMs,
                 phase: message.phase ?? null,
               });
 
-              // record chart data on every progress event
-              if (message.iterationsCompleted > 0 && message.timePerOp > 0) {
+              if (message.timePerOp > 0) {
                 store.addChartPoint(message.runId, {
                   time: message.elapsedTime,
                   timePerOp: message.timePerOp,
-                  iterations: message.iterationsCompleted,
                   phase: message.phase ?? null,
                 });
               }
@@ -241,15 +317,12 @@ export const benchmarkService = {
                 const observations = entry.evidence.observations;
                 if (observations.length > 0) {
                   const startedAt = observations[0].startedAtMs;
-                  let cumulativeOps = 0;
                   const points = [];
                   for (const observation of observations) {
-                    cumulativeOps += observation.operations;
                     if (observation.operations <= 0 || observation.elapsedMs <= 0) continue;
                     points.push({
                       time: observation.startedAtMs - startedAt + observation.elapsedMs,
                       timePerOp: observation.elapsedMs / observation.operations,
-                      iterations: cumulativeOps,
                       phase: observation.phase,
                     });
                   }
@@ -269,8 +342,7 @@ export const benchmarkService = {
                 }
               }
 
-              teardown();
-              resolve(callEntries);
+              session.settle({ type: "resolve", results: callEntries });
               break;
             }
             case "evidenceStatus": {
@@ -284,18 +356,17 @@ export const benchmarkService = {
               break;
             }
             case "error": {
-              store.updateRun(message.runId, {
-                status: "failed",
-                error: message.error,
-              });
+              store.terminalizeRuns(session.runIds, "failed", message.error);
               store.addConsoleLog(message.runId, {
                 level: "error",
                 message: `[benchmate] ${message.error}`,
                 timestamp: Date.now(),
                 count: 1,
               });
-              teardown();
-              reject(new Error(message.error));
+              session.settle({
+                type: "reject",
+                error: new Error(message.error),
+              });
               break;
             }
             case "consoleBatch": {
@@ -370,7 +441,7 @@ export const benchmarkService = {
         });
 
         // start benchmark
-        worker.postMessage({
+        sessionWorker.postMessage({
           type: "start",
           runs: processedRuns.map((run) => ({
             runId: run.runId,
@@ -379,11 +450,13 @@ export const benchmarkService = {
           options: runnerOptions,
         });
       } catch (error) {
-        teardown();
-        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
-        reject(error);
+        if (!isActiveSession(session)) return;
+        store.terminalizeRuns(session.runIds, "failed", serializeError(error).message || "Benchmark failed");
+        session.settle({ type: "reject", error });
       }
     });
   },
+  discardRunsForImplementations,
+  dispose,
   stopBenchmark,
 };

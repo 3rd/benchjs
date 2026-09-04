@@ -1,1 +1,1 @@
-export * from "./DependencyService";
+export { DependencyService } from "./DependencyService";

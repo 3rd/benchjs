@@ -3,11 +3,12 @@ import { Monaco as MonacoEditor } from "@monaco-editor/react";
 import { editor as RawMonacoEditor } from "monaco-editor";
 import { nanoid } from "nanoid";
 import { ImperativePanelHandle } from "react-resizable-panels";
+import { useShallow } from "zustand/shallow";
 import { useLatestRunForImplementation } from "@/stores/benchmarkStore";
 import { getCurrentDocument, usePersistentStore } from "@/stores/persistentStore";
 import { useUserStore } from "@/stores/userStore";
 import { useMonacoTabs } from "@/hooks/useMonacoTabs";
-import { DEFAULT_IMPLEMENTATION } from "@/constants";
+import { DEFAULT_IMPLEMENTATION, README_FILE_ID, SETUP_FILE_ID } from "@/constants";
 import { cn } from "@/lib/utils";
 import { benchmarkService } from "@/services/benchmark/benchmark-service";
 import { DependencyService } from "@/services/dependencies";
@@ -25,19 +26,30 @@ interface CodeViewProps {
 }
 
 export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeViewProps) => {
-  const store = usePersistentStore();
-  const currentDocument = getCurrentDocument(store);
+  const currentDocument = usePersistentStore(getCurrentDocument);
+  const store = usePersistentStore(
+    useShallow((state) => ({
+      addImplementation: state.addImplementation,
+      removeImplementation: state.removeImplementation,
+      renameImplementation: state.renameImplementation,
+      updateImplementationCode: state.updateImplementationCode,
+      setSetupCode: state.setSetupCode,
+      setSetupDTS: state.setSetupDTS,
+      setReadmeContent: state.setReadmeContent,
+    })),
+  );
   const { codeViewLayout: layout, setCodeViewLayout, theme } = useUserStore();
 
   const currentImplementation = useMemo(() => {
     return currentDocument.implementations.find((item) => item.id === monacoTabs.activeTabId);
   }, [currentDocument.implementations, monacoTabs.activeTabId]);
+  const currentImplementationId = currentImplementation?.id;
 
   const latestRun = useLatestRunForImplementation(currentImplementation?.id ?? "");
 
   const getFileContent = (id: string) => {
-    if (id === "README.md") return currentDocument.readmeContent;
-    if (id === "setup.ts") return currentDocument.setupCode;
+    if (id === README_FILE_ID) return currentDocument.readmeContent;
+    if (id === SETUP_FILE_ID) return currentDocument.setupCode;
     return currentDocument.implementations.find((item) => item.id === id)?.content || "";
   };
 
@@ -122,13 +134,13 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
           },
         },
         {
-          id: "setup.ts",
-          name: "setup.ts",
+          id: SETUP_FILE_ID,
+          name: SETUP_FILE_ID,
           type: "file",
         },
         {
-          id: "README.md",
-          name: "README.md",
+          id: README_FILE_ID,
+          name: README_FILE_ID,
           type: "file",
         },
       ],
@@ -136,22 +148,22 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
   }, [currentDocument.implementations, monacoTabs, store]);
 
   const extraLibs = useMemo(() => {
-    if (!currentImplementation) return [];
+    if (!currentImplementationId) return [];
     return [
       {
         filename: "file:///setup.d.ts",
         content: currentDocument.setupDTS,
       },
     ];
-  }, [currentDocument.setupDTS, currentImplementation]);
+  }, [currentDocument.setupDTS, currentImplementationId]);
 
   const handleFileContentChange = useCallback(
     (content: string | undefined) => {
       if (!monacoTabs.activeTabId || content === undefined) return;
 
-      if (monacoTabs.activeTabId === "setup.ts") {
+      if (monacoTabs.activeTabId === SETUP_FILE_ID) {
         store.setSetupCode(content);
-      } else if (monacoTabs.activeTabId === "README.md") {
+      } else if (monacoTabs.activeTabId === README_FILE_ID) {
         store.setReadmeContent(content);
       } else {
         store.updateImplementationCode(monacoTabs.activeTabId, content);
@@ -168,9 +180,11 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
   );
 
   const handleRun = useCallback(() => {
-    if (!currentImplementation) return;
-    benchmarkService.runBenchmark(currentDocument.setupCode, [currentImplementation]);
-  }, [currentDocument.setupCode, currentImplementation]);
+    const document = getCurrentDocument(usePersistentStore.getState());
+    const implementation = document.implementations.find((item) => item.id === monacoTabs.activeTabId);
+    if (!implementation) return;
+    benchmarkService.runBenchmark(document.setupCode, [implementation]);
+  }, [monacoTabs.activeTabId]);
 
   const handleStop = useCallback(() => {
     if (!latestRun) return;
@@ -193,6 +207,17 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
   const runPanelRef = useRef<ImperativePanelHandle>(null);
   const [isRunPanelCollapsed, setIsRunPanelCollapsed] = useState(false);
   const [activeRunPanelTab, setActiveRunPanelTab] = useState<"console" | "run">("run");
+  const handleLayoutChange = useCallback(() => {
+    setCodeViewLayout(layout === "vertical" ? "horizontal" : "vertical");
+  }, [layout, setCodeViewLayout]);
+  const handleCollapseRunPanel = useCallback(() => {
+    runPanelRef.current?.collapse();
+    setIsRunPanelCollapsed(true);
+  }, []);
+  const handleExpandRunPanel = useCallback(() => {
+    runPanelRef.current?.expand();
+    setIsRunPanelCollapsed(false);
+  }, []);
 
   return (
     <ResizablePanelGroup className="flex flex-1 w-full" direction="horizontal">
@@ -234,7 +259,7 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
               onCloseTab={monacoTabs.closeTab}
               onCloseTabsToLeft={monacoTabs.closeTabsToLeft}
               onCloseTabsToRight={monacoTabs.closeTabsToRight}
-              onDTSChange={monacoTabs.activeTabId === "setup.ts" ? handleSetupDTSChange : undefined}
+              onDTSChange={monacoTabs.activeTabId === SETUP_FILE_ID ? handleSetupDTSChange : undefined}
               onMount={handleEditorMount}
               onSetTabs={monacoTabs.setTabs}
             />
@@ -253,18 +278,13 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
               >
                 <RunPanel
                   activeTab={activeRunPanelTab}
-                  implementation={currentImplementation}
+                  implementationId={currentImplementation.id}
                   layout={layout}
-                  onLayoutChange={() => setCodeViewLayout(layout === "vertical" ? "horizontal" : "vertical")}
+                  onLayoutChange={handleLayoutChange}
                   onRun={handleRun}
                   onStop={handleStop}
                   onTabChange={setActiveRunPanelTab}
-                  onToggleCollapse={() => {
-                    if (runPanelRef.current) {
-                      runPanelRef.current.collapse();
-                      setIsRunPanelCollapsed(true);
-                    }
-                  }}
+                  onToggleCollapse={handleCollapseRunPanel}
                 />
               </ResizablePanel>
 
@@ -274,15 +294,10 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
                   activeTab={activeRunPanelTab}
                   isRunning={latestRun?.status === "running" || latestRun?.status === "warmup"}
                   layout={layout}
-                  collapsed
-                  onLayoutChange={() => setCodeViewLayout(layout === "vertical" ? "horizontal" : "vertical")}
+                  isCollapsed
+                  onLayoutChange={handleLayoutChange}
                   onTabChange={(tab) => setActiveRunPanelTab(tab as "console" | "run")}
-                  onToggleCollapse={() => {
-                    if (runPanelRef.current) {
-                      runPanelRef.current.expand();
-                      setIsRunPanelCollapsed(false);
-                    }
-                  }}
+                  onToggleCollapse={handleExpandRunPanel}
                 />
               )}
             </>

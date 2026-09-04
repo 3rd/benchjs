@@ -1,5 +1,5 @@
-import { createBenchmarkResult } from "@/testing/benchmark-fixtures";
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { createBenchmarkResult } from "@/testing/benchmark-fixtures";
 import { BenchmarkStatus } from "@/stores/benchmarkStore";
 import { ComparisonChart } from "./ComparisonChart";
 
@@ -36,8 +36,8 @@ const mockRuns = {
       originalCode: 'console.log("test")',
       processedCode: 'console.log("test")',
       elapsedTime: 1000,
-      completedIterations: 100_000,
-      totalIterations: 1000,
+      measurementOperations: 100_000,
+      measurementElapsedMs: 1000,
       progress: 100,
       createdAt: now,
       warmupStartedAt: now + 100,
@@ -58,8 +58,8 @@ const mockRuns = {
       originalCode: 'console.log("test2")',
       processedCode: 'console.log("test2")',
       elapsedTime: 500,
-      completedIterations: 500,
-      totalIterations: 1000,
+      measurementOperations: 500,
+      measurementElapsedMs: 500,
       progress: 50,
       createdAt: now,
       warmupStartedAt: now + 100,
@@ -69,7 +69,15 @@ const mockRuns = {
         operations: 50,
         blocks: 5,
         elapsedMs: 500,
-        timePerOperationMs: { min: 450, max: 550, average: 500, median: 500, percentile50: 500, percentile90: 525, percentile95: 537 },
+        timePerOperationMs: {
+          min: 450,
+          max: 550,
+          average: 500,
+          median: 500,
+          percentile50: 500,
+          percentile90: 525,
+          percentile95: 537,
+        },
         operationsPerSecond: { average: 1500, max: 550, min: 450 },
       }),
     },

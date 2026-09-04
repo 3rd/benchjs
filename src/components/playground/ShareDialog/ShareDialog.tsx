@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import { Check, Copy, Download } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  LabelList,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 // import { SiFacebook, SiLinkedin, SiX } from "@icons-pack/react-simple-icons";
 import type { BenchmarkRun } from "@/stores/benchmarkStore";
 import type { Implementation } from "@/stores/persistentStore";
@@ -123,7 +132,6 @@ export function ShareDialog({ implementations, runs, shareUrl, open, onOpenChang
   useEffect(() => {
     if (!open) return;
     setSelectedImplementations(implementationsWithRuns.map((item) => item.id));
-    // eslint-disable-next-line react-hooks-addons/no-unused-deps
   }, [implementationsWithRuns, open]);
 
   return (

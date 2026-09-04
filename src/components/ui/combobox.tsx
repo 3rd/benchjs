@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "./input";
@@ -19,11 +19,20 @@ interface ComboboxProps {
   onSelect: (value: string) => void;
   options: ComboboxOption[];
   isLoading?: boolean;
+  hasSearched: boolean;
   error?: string | null;
   placeholder?: string;
   className?: string;
   disabled?: boolean;
 }
+
+const EMPTY_RESULTS_MESSAGE = "No packages found";
+
+const formatMonthlyDownloads = (downloads: number) => {
+  if (downloads >= 1_000_000) return `${(downloads / 1_000_000).toFixed(1)}M`;
+  if (downloads >= 1000) return `${(downloads / 1000).toFixed(1)}k`;
+  return String(downloads);
+};
 
 export const Combobox = ({
   value,
@@ -31,6 +40,7 @@ export const Combobox = ({
   onSelect,
   options,
   isLoading = false,
+  hasSearched,
   error = null,
   placeholder = "Search...",
   className,
@@ -40,8 +50,9 @@ export const Combobox = ({
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const listboxId = useId();
+  const getOptionId = (index: number) => `${listboxId}-option-${index}`;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -63,13 +74,11 @@ export const Combobox = ({
   }, [options.length]);
 
   useEffect(() => {
-    if (selectedIndex >= 0 && isOpen) {
+    if (selectedIndex >= 0 && selectedIndex < options.length && isOpen) {
       const selectedElement = optionRefs.current[selectedIndex];
       selectedElement?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      // focus the element for proper Tab navigation
-      selectedElement?.focus();
     }
-  }, [selectedIndex, isOpen]);
+  }, [selectedIndex, isOpen, options.length]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
@@ -78,8 +87,10 @@ export const Combobox = ({
     setSelectedIndex(-1);
   };
 
+  const hasDropdownContent = options.length > 0 || isLoading || Boolean(error) || hasSearched;
+
   const handleInputFocus = () => {
-    if (options.length > 0 || isLoading) {
+    if (hasDropdownContent) {
       setIsOpen(true);
     }
   };
@@ -94,7 +105,7 @@ export const Combobox = ({
     if (disabled) return;
 
     switch (e.key) {
-      case "ArrowDown":
+      case "ArrowDown": {
         e.preventDefault();
         if (!isOpen && options.length > 0) {
           setIsOpen(true);
@@ -103,69 +114,45 @@ export const Combobox = ({
           setSelectedIndex((prev) => (prev < options.length - 1 ? prev + 1 : 0));
         }
         break;
-      case "ArrowUp":
+      }
+      case "ArrowUp": {
         e.preventDefault();
         if (isOpen && options.length > 0) {
           setSelectedIndex((prev) => (prev > 0 ? prev - 1 : options.length - 1));
         }
         break;
-      case "Home":
+      }
+      case "Home": {
         e.preventDefault();
         if (isOpen && options.length > 0) {
           setSelectedIndex(0);
         }
         break;
-      case "End":
+      }
+      case "End": {
         e.preventDefault();
         if (isOpen && options.length > 0) {
           setSelectedIndex(options.length - 1);
         }
         break;
-      case "PageDown":
+      }
+      case "PageDown": {
         e.preventDefault();
         if (isOpen && options.length > 0) {
           const pageSize = 5;
           setSelectedIndex((prev) => Math.min(prev + pageSize, options.length - 1));
         }
         break;
-      case "PageUp":
+      }
+      case "PageUp": {
         e.preventDefault();
         if (isOpen && options.length > 0) {
           const pageSize = 5;
           setSelectedIndex((prev) => Math.max(prev - pageSize, 0));
         }
         break;
-      case "Tab":
-        if (isOpen && options.length > 0) {
-          if (e.shiftKey) {
-            // Shift+Tab: move to previous option or close if at first
-            if (selectedIndex > 0) {
-              e.preventDefault();
-              setSelectedIndex(selectedIndex - 1);
-            } else if (selectedIndex === 0) {
-              e.preventDefault();
-              setIsOpen(false);
-              setSelectedIndex(-1);
-            }
-            // if selectedIndex === -1, allow default behavior
-          } else {
-            // Tab: move to next option or close if at last
-            if (selectedIndex < options.length - 1) {
-              e.preventDefault();
-              setSelectedIndex(selectedIndex + 1);
-            } else if (selectedIndex === options.length - 1) {
-              e.preventDefault();
-              setIsOpen(false);
-              setSelectedIndex(-1);
-            } else if (selectedIndex === -1 && options.length > 0) {
-              // start from first option
-              e.preventDefault();
-              setSelectedIndex(0);
-            }
-          }
-        }
-        break;
-      case "Enter":
+      }
+      case "Enter": {
         e.preventDefault();
         if (selectedIndex >= 0 && selectedIndex < options.length) {
           handleSelect(options[selectedIndex]);
@@ -176,95 +163,42 @@ export const Combobox = ({
           handleSelect(options[0]);
         }
         break;
-      case "Escape":
+      }
+      case "Escape": {
         e.preventDefault();
         setIsOpen(false);
         setSelectedIndex(-1);
         inputRef.current?.blur();
         break;
+      }
+      default: {
+        break;
+      }
     }
   };
 
-  const handleOptionKeyDown = (e: React.KeyboardEvent<HTMLDivElement>, index: number) => {
-    switch (e.key) {
-      case "Enter":
-      case " ":
-        e.preventDefault();
-        handleSelect(options[index]);
-        break;
-      case "ArrowDown":
-        e.preventDefault();
-        setSelectedIndex(index < options.length - 1 ? index + 1 : 0);
-        break;
-      case "ArrowUp":
-        e.preventDefault();
-        setSelectedIndex(index > 0 ? index - 1 : options.length - 1);
-        break;
-      case "Home":
-        e.preventDefault();
-        setSelectedIndex(0);
-        break;
-      case "End":
-        e.preventDefault();
-        setSelectedIndex(options.length - 1);
-        break;
-      case "PageDown":
-        e.preventDefault();
-        const pageSizeDown = 5;
-        setSelectedIndex(Math.min(index + pageSizeDown, options.length - 1));
-        break;
-      case "PageUp":
-        e.preventDefault();
-        const pageSizeUp = 5;
-        setSelectedIndex(Math.max(index - pageSizeUp, 0));
-        break;
-      case "Escape":
-        e.preventDefault();
-        setIsOpen(false);
-        setSelectedIndex(-1);
-        inputRef.current?.focus();
-        break;
-      case "Tab":
-        // Tab navigation: move to next/previous option or close dropdown
-        if (!e.shiftKey) {
-          // Tab: move to next option or close if at last
-          if (index < options.length - 1) {
-            e.preventDefault();
-            setSelectedIndex(index + 1);
-          } else {
-            // at last item, close and allow Tab to move to next element
-            setIsOpen(false);
-            setSelectedIndex(-1);
-          }
-        } else {
-          // Shift+Tab: move to previous option or close if at first
-          if (index > 0) {
-            e.preventDefault();
-            setSelectedIndex(index - 1);
-          } else {
-            // at first item, close and allow Shift+Tab to move to previous element
-            setIsOpen(false);
-            setSelectedIndex(-1);
-          }
-        }
-        break;
-    }
-  };
-
-  const showDropdown = isOpen && (options.length > 0 || isLoading || error);
+  const showDropdown = isOpen && hasDropdownContent;
+  const activeOptionId =
+    showDropdown && selectedIndex >= 0 && selectedIndex < options.length ?
+      getOptionId(selectedIndex)
+    : undefined;
 
   return (
     <div ref={containerRef} className={cn("relative w-full", className)}>
       <div className="relative">
         <Input
           ref={inputRef}
+          role="combobox"
+          aria-activedescendant={activeOptionId}
+          aria-controls={listboxId}
+          aria-expanded={showDropdown}
           value={value}
-          onChange={handleInputChange}
-          onFocus={handleInputFocus}
-          onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled}
           className="pr-8"
+          onChange={handleInputChange}
+          onFocus={handleInputFocus}
+          onKeyDown={handleKeyDown}
         />
         <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
           {isLoading ?
@@ -276,8 +210,14 @@ export const Combobox = ({
         </div>
       </div>
 
+      <div role="status" aria-atomic="true" className="sr-only">
+        {hasSearched && !isLoading && !error && options.length === 0 ? EMPTY_RESULTS_MESSAGE : ""}
+      </div>
+
       {showDropdown && (
         <div
+          id={listboxId}
+          role="listbox"
           className={cn(
             "absolute z-50 mt-1 w-full rounded-md border bg-popover text-popover-foreground shadow-md",
             "max-h-[300px] overflow-auto",
@@ -292,19 +232,19 @@ export const Combobox = ({
 
           {error && <div className="p-4 text-sm text-destructive">{error}</div>}
 
-          {!isLoading && !error && options.length === 0 && (
-            <div className="p-4 text-sm text-muted-foreground text-center">No packages found</div>
+          {hasSearched && !isLoading && !error && options.length === 0 && (
+            <div className="p-4 text-sm text-muted-foreground text-center">{EMPTY_RESULTS_MESSAGE}</div>
           )}
 
           {!isLoading && !error && options.length > 0 && (
-            <div ref={listRef} className="p-1">
+            <div className="p-1">
               {options.map((option, index) => (
                 <div
                   key={option.value}
                   ref={(el) => {
                     optionRefs.current[index] = el;
                   }}
-                  tabIndex={selectedIndex === index ? 0 : -1}
+                  id={getOptionId(index)}
                   role="option"
                   aria-selected={selectedIndex === index}
                   className={cn(
@@ -315,7 +255,6 @@ export const Combobox = ({
                   )}
                   onClick={() => handleSelect(option)}
                   onMouseEnter={() => setSelectedIndex(index)}
-                  onKeyDown={(e) => handleOptionKeyDown(e, index)}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
@@ -332,11 +271,7 @@ export const Combobox = ({
                       )}
                       {option.monthlyDownloads !== undefined && (
                         <div>
-                          {option.monthlyDownloads >= 1000000 ?
-                            `${(option.monthlyDownloads / 1000000).toFixed(1)}M`
-                          : option.monthlyDownloads >= 1000 ?
-                            `${(option.monthlyDownloads / 1000).toFixed(1)}k`
-                          : option.monthlyDownloads}
+                          {formatMonthlyDownloads(option.monthlyDownloads)}
                           /mo
                         </div>
                       )}
