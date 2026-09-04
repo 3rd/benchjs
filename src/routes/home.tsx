@@ -98,7 +98,7 @@ const HomePage = () => {
           <div className="mx-auto grid max-w-7xl items-center gap-16 lg:grid-cols-[minmax(0,0.88fr)_minmax(620px,1.12fr)] lg:gap-12">
             <div className="max-w-2xl">
               <h1 className="max-w-3xl text-balance text-5xl font-bold leading-[1.02] tracking-[-0.045em] sm:text-6xl lg:text-7xl">
-                JavaScript benchmarks in your browser.
+                JavaScript benchmarks in the browser.
               </h1>
 
               <p className="mt-8 max-w-xl text-pretty text-lg leading-8 text-muted-foreground sm:text-xl">

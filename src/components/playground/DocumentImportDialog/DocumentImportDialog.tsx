@@ -26,7 +26,6 @@ export const DocumentImportDialog = ({
   return (
     <Dialog open={open}>
       <DialogContent
-        animation="fade-scale"
         className="gap-0 overflow-hidden bg-card p-0 shadow-2xl duration-150 sm:max-w-md [&>button]:hidden"
         overlayClassName="bg-black/50 backdrop-blur-[2px] duration-150 dark:bg-black/60"
         onEscapeKeyDown={(event) => event.preventDefault()}

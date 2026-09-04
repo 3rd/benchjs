@@ -174,6 +174,7 @@ export default function EditorRoute() {
   });
   const [activeTab, setActiveTab] = useState<SidebarTab>("code");
   const [shareData, setShareData] = useState<ShareDialogPayload | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const handleShare = () => {
     flushDocumentSaves();
@@ -184,6 +185,7 @@ export default function EditorRoute() {
       runs: useBenchmarkStore.getState().runs,
       shareUrl,
     });
+    setShareOpen(true);
   };
 
   const handleOverwriteDocument = () => {
@@ -261,10 +263,10 @@ export default function EditorRoute() {
 
       <ShareDialog
         implementations={shareData?.implementations ?? []}
-        open={Boolean(shareData)}
+        open={shareOpen}
         runs={shareData?.runs ?? {}}
         shareUrl={shareData?.shareUrl ?? ""}
-        onOpenChange={(open) => setShareData(open ? shareData : null)}
+        onOpenChange={setShareOpen}
       />
 
       <DocumentImportDialog
