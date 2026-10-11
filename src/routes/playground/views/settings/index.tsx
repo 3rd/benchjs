@@ -40,6 +40,16 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
     dependencyService.removeLibrary(name);
   };
 
+  const cancelPendingSearch = () => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+  };
+
   const addPackage = async (packageSpec: string, packageNameFromOption?: string) => {
     if (!packageSpec.trim()) return;
     const trimmedName = packageSpec.trim();
@@ -54,9 +64,12 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
       removePackage(lib.name);
     }
 
+    cancelPendingSearch();
     setLibraryName("");
     setSuggestions([]);
     setHasSearched(false);
+    setIsSearching(false);
+
     store.addLibrary(trimmedName);
     await dependencyService.addLibrary({ name: trimmedName });
     setCacheCount(await cache.count());
@@ -77,15 +90,7 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
     setHasSearched(false);
     setSearchError(null);
 
-    // cancel previous timeout
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
-
-    // cancel previous request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    cancelPendingSearch();
 
     // don't search if query is too short
     if (query.trim().length < 2) {
@@ -94,9 +99,10 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
       return;
     }
 
+    setIsSearching(true);
+
     // debounce search
     searchTimeoutRef.current = setTimeout(async () => {
-      setIsSearching(true);
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
@@ -223,7 +229,7 @@ export function SettingsView({ dependencyService }: SettingsViewProps) {
                                 <>
                                   {getStatusBadge(dependency.status)}
                                   {dependency.error && (
-                                    <span className="ml-2 text-sm text-destructive-foreground">
+                                    <span className="ml-2 text-sm text-destructive">
                                       {dependency.error}
                                     </span>
                                   )}

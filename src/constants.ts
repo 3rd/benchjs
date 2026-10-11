@@ -6,7 +6,7 @@ export const README_CONTENT = `# Quick Start Guide
 
 ## File Structure
 - setup.ts: Setup code to prepare data, create helper functions, etc.
-- implementations/*.{ts,js}: Implementation files containing benchmarkFn
+- implementations/*.{ts,js}: Implementation files exporting a function named run
 
 ## Writing Benchmarks
 
@@ -17,7 +17,7 @@ Everything you export will be available as a global for each implementation.
 \`\`\`typescript
 // create and export test data
 export const data = Array.from({ length: 1000 }, (_, i) => i);
-export const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
+export const sum = (a: number, b: number) => a + b;
 \`\`\`
 
 2. Implementations (example.ts):

@@ -309,6 +309,7 @@ export const benchmarkService = {
                   const startedAt = observations[0].startedAtMs;
                   const points = [];
                   for (const observation of observations) {
+                    if (observation.phase === "overhead") continue;
                     if (observation.operations <= 0 || observation.elapsedMs <= 0) continue;
                     points.push({
                       time: observation.startedAtMs - startedAt + observation.elapsedMs,

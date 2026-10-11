@@ -325,6 +325,60 @@ describe("benchmark session lifecycle", () => {
     expect(benchmarkMocks.terminate).toHaveBeenCalledTimes(1);
   });
 
+  it("charts the completed run without harness overhead blocks", async () => {
+    const { resultPromise } = await startBenchmark([implementations[0]]);
+    const run = getLatestRun("first");
+
+    const createObservation = ({
+      sequence,
+      phase,
+      startedAtMs,
+      operations,
+    }: {
+      sequence: number;
+      phase: BenchmarkResult["evidence"]["observations"][number]["phase"];
+      startedAtMs: number;
+      operations: number;
+    }) => ({
+      sequence,
+      task: run.id,
+      phase,
+      startedAtMs,
+      elapsedMs: 10,
+      operations,
+      round: null,
+      seed: null,
+      resultHash: null,
+      flags: [],
+    });
+
+    const completeMessage = createCompleteMessage(run.id);
+
+    dispatchWorkerMessage({
+      ...completeMessage,
+      result: {
+        ...completeMessage.result,
+        entries: [
+          createBenchmarkResult(run.id, {
+            observations: [
+              createObservation({ sequence: 0, phase: "probe", startedAtMs: 0, operations: 2 }),
+              createObservation({ sequence: 1, phase: "overhead", startedAtMs: 10, operations: 1_000_000 }),
+              createObservation({ sequence: 2, phase: "calibration", startedAtMs: 20, operations: 4 }),
+              createObservation({ sequence: 3, phase: "measurement", startedAtMs: 30, operations: 5 }),
+            ],
+          }),
+        ],
+      },
+    });
+
+    await resultPromise;
+    expect(useBenchmarkStore.getState().chartData[run.id]).toEqual([
+      { time: 10, timePerOp: 5, phase: "probe" },
+      { time: 30, timePerOp: 2.5, phase: "calibration" },
+      { time: 40, timePerOp: 2, phase: "measurement" },
+    ]);
+  });
+
   it("fails every active run and releases the worker after an error", async () => {
     const { resultPromise } = await startBenchmark(implementations.slice(0, 2));
 

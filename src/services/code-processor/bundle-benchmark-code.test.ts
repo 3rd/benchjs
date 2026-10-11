@@ -20,8 +20,11 @@ const bundleRunBody = async (userCode: string, setupCode = "") => {
   return body.slice(0, defaultExportIndex).trim();
 };
 
-const executeBundledRun = async (userCode: string, ...args: unknown[]) => {
-  const bundle = await bundleBenchmarkCode(userCode, "");
+const executeBundledRun = async (
+  userCode: string,
+  { setupCode = "", args = [] }: { setupCode?: string; args?: unknown[] } = {},
+) => {
+  const bundle = await bundleBenchmarkCode(userCode, setupCode);
   const module: unknown = await import(
     `data:text/javascript;base64,${Buffer.from(bundle).toString("base64")}`
   );
@@ -166,6 +169,18 @@ describe("bundleBenchmarkCode", () => {
       expect(await executeBundledRun(code)).toBe(42);
     });
 
+    it.each([
+      [
+        "an annotated local in a run arrow body",
+        `export const run = () => { const x: number = 0; return x; };`,
+        0,
+      ],
+      ["a run function declaration return type", `export function run(): number { return 1; }`, 1],
+      ["a typed parameter of a default arrow export", `export default (n: number = 3) => n;`, 3],
+    ])("should erase TypeScript syntax from %s", async (_name, code, expected) => {
+      expect(await executeBundledRun(code)).toBe(expected);
+    });
+
     it("should reject a reassigned run binding instead of benchmarking its original value", async () => {
       await expect(
         bundleBenchmarkCode(
@@ -187,7 +202,7 @@ describe("bundleBenchmarkCode", () => {
             return n === 0 ? 0 : recurse(n - 1);
           }
         `,
-          5,
+          { args: [5] },
         ),
       ).toBe(0);
     });
@@ -201,7 +216,7 @@ describe("bundleBenchmarkCode", () => {
             return n % 2 === 0 ? run(n - 1) : recurse(n - 1);
           };
         `,
-          5,
+          { args: [5] },
         ),
       ).toBe(0);
     });
@@ -314,9 +329,45 @@ describe("bundleBenchmarkCode", () => {
 
   describe("setup code", () => {
     it("should hoist setup declarations above the run function", async () => {
-      const body = await bundleRunBody(`export const run = () => data.length;`, `const data = [1, 2, 3];`);
+      const body = await bundleRunBody(`export const run = () => data.length;`, `export const data = [1, 2, 3];`);
 
       expect(body).toBe("var data = [1, 2, 3];\nfunction run() {\n  return data.length;\n}");
+    });
+
+    it("should let implementation declarations shadow setup exports", async () => {
+      expect(
+        await executeBundledRun(
+          `
+            const sum = (a: number, b: number) => a * 10 + b;
+            export const run = () => data.reduce(sum, 0);
+          `,
+          {
+            setupCode: `
+              export const data = [1, 2, 3, 4];
+              export const sum = (a: number, b: number) => a + b;
+            `,
+          },
+        ),
+      ).toBe(1234);
+    });
+
+    it("should hide setup declarations that are not exported", async () => {
+      expect(
+        await executeBundledRun(`export const run = () => typeof secret;`, {
+          setupCode: `
+            const secret = 1;
+            export const data = [secret];
+          `,
+        }),
+      ).toBe("undefined");
+    });
+
+    it("should let an implementation declare a setup export ambiently", async () => {
+      expect(
+        await executeBundledRun(`declare const data: number[]; export const run = () => data[0];`, {
+          setupCode: `export const data = [8];`,
+        }),
+      ).toBe(8);
     });
   });
 });

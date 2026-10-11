@@ -254,7 +254,7 @@ export default function EditorRoute() {
               monacoTabs={monacoTabs}
             />
           )}
-          {activeTab === "compare" && <CompareView />}
+          {activeTab === "compare" && <CompareView onShare={handleShare} />}
           {activeTab === "settings" && (
             <SettingsView dependencyService={dependencyService.current} />
           )}
@@ -279,7 +279,7 @@ export default function EditorRoute() {
         onOverwrite={handleOverwriteDocument}
       />
 
-      <div className="flex fixed top-0 right-0 bottom-0 left-0 z-50 justify-center items-center p-4 w-full h-full sm:hidden bg-black/50 backdrop-blur-sm dark:bg-black/80">
+      <div className="flex fixed top-0 right-0 bottom-0 left-0 z-50 justify-center items-center p-4 w-full h-full sm:hidden bg-black/40 backdrop-blur-sm dark:bg-black/60">
         <div className="flex flex-col gap-4 justify-center items-center p-4 py-8 text-center bg-card border-2 border-border rounded-lg">
           <h1 className="mb-4 text-2xl font-bold">
             Mobile is not supported 🫠

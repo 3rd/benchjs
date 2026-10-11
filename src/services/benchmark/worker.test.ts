@@ -16,7 +16,16 @@ vi.mock("benchmate", () => ({
   blackhole: vi.fn(),
 }));
 
+const nativeConsoleMethods = {
+  log: console.log,
+  warn: console.warn,
+  error: console.error,
+  info: console.info,
+  debug: console.debug,
+};
+
 afterEach(() => {
+  Object.assign(console, nativeConsoleMethods);
   vi.restoreAllMocks();
   vi.resetModules();
 });
@@ -55,6 +64,148 @@ it("revokes a benchmark module URL when importing it fails", async () => {
     type: "error",
     runId: "run-1",
     error: "import failed",
+  });
+});
+
+it("forwards console output from module evaluation to its run before tasks start", async () => {
+  const handlers: Record<string, (event: BenchEvents["taskStart"]) => void> = {};
+  benchMocks.on.mockImplementation((event: string, handler: (event: BenchEvents["taskStart"]) => void) => {
+    handlers[event] = handler;
+  });
+  benchMocks.run.mockImplementationOnce(() => {
+    handlers.taskStart({ task: "run-1" });
+  });
+  vi.spyOn(URL, "createObjectURL")
+    .mockReturnValueOnce(`data:text/javascript,${encodeURIComponent('console.log("setup ran"); export default () => 1;')}`)
+    .mockReturnValueOnce(`data:text/javascript,${encodeURIComponent('console.log("setup ran"); export default () => 2;')}`);
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  const { listener, postMessage } = await startWorker();
+
+  await listener({
+    data: {
+      type: "start",
+      runs: [
+        { runId: "run-1", processedCode: "" },
+        { runId: "run-2", processedCode: "" },
+      ],
+    },
+  });
+
+  expect(postMessage.mock.calls.slice(0, 3).map(([message]) => message)).toEqual([
+    { type: "consoleBatch", runId: "run-1", logs: [{ level: "log", message: "setup ran", count: 1 }] },
+    { type: "consoleBatch", runId: "run-2", logs: [{ level: "log", message: "setup ran", count: 1 }] },
+    { type: "taskStart", runId: "run-1" },
+  ]);
+});
+
+it("logs errors, collections, undefined, functions, and symbols as readable text", async () => {
+  const handlers: Record<string, (event: BenchEvents["taskStart"]) => void> = {};
+  benchMocks.on.mockImplementation((event: string, handler: (event: BenchEvents["taskStart"]) => void) => {
+    handlers[event] = handler;
+  });
+  benchMocks.run.mockImplementationOnce(() => {
+    handlers.taskStart({ task: "run-1" });
+
+    const parse = () => 1;
+    console.log("text", new Error("boom"), undefined, NaN, new Map([[1, "a"]]), new Set([3]), () => 1, parse, Symbol("s"), {
+      a: 1,
+    });
+  });
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("data:text/javascript,export%20default%20()%20%3D%3E%201%3B");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  const { listener, postMessage } = await startWorker();
+
+  await listener({ data: { type: "start", runs: [{ runId: "run-1", processedCode: "" }] } });
+
+  expect(postMessage).toHaveBeenCalledWith({
+    type: "consoleBatch",
+    runId: "run-1",
+    logs: [
+      {
+        level: "log",
+        message:
+          'text Error: boom undefined NaN Map(1) {1 => "a"} Set(1) {3} [Function] [Function: parse] Symbol(s) {"a":1}',
+        count: 1,
+      },
+    ],
+  });
+});
+
+it("completes the run when logged values contain cycles, BigInts, or throwing getters", async () => {
+  const handlers: Record<string, (event: BenchEvents["taskStart"]) => void> = {};
+  benchMocks.on.mockImplementation((event: string, handler: (event: BenchEvents["taskStart"]) => void) => {
+    handlers[event] = handler;
+  });
+  benchMocks.run.mockImplementationOnce(() => {
+    handlers.taskStart({ task: "run-1" });
+
+    const node: Record<string, unknown> = { name: "n" };
+    node.self = node;
+    const shared = { x: 1 };
+    const loop = new Map<string, unknown>();
+    loop.set("self", loop);
+    const hostile = {
+      get broken() {
+        throw new Error("getter");
+      },
+    };
+
+    console.log(node, { a: shared, b: shared }, 10n, { n: 1n }, hostile, loop);
+  });
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("data:text/javascript,export%20default%20()%20%3D%3E%201%3B");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  const { listener, postMessage } = await startWorker();
+
+  await listener({ data: { type: "start", runs: [{ runId: "run-1", processedCode: "" }] } });
+
+  expect(postMessage).toHaveBeenCalledWith({
+    type: "consoleBatch",
+    runId: "run-1",
+    logs: [
+      {
+        level: "log",
+        message:
+          '{"name":"n","self":"[Circular]"} {"a":{"x":1},"b":{"x":1}} 10n {"n":"1n"} [Unserializable] Map(1) {"self" => [Circular]}',
+        count: 1,
+      },
+    ],
+  });
+  expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "complete" }));
+});
+
+it("keeps the first 1000 console entries of a run and counts later messages as omitted", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(0);
+
+  const handlers: Record<string, (event: BenchEvents["taskStart"]) => void> = {};
+  benchMocks.on.mockImplementation((event: string, handler: (event: BenchEvents["taskStart"]) => void) => {
+    handlers[event] = handler;
+  });
+  benchMocks.run.mockImplementationOnce(() => {
+    handlers.taskStart({ task: "run-1" });
+
+    for (let repeat = 0; repeat < 3; repeat++) {
+      console.log("same");
+    }
+
+    for (let index = 0; index < 1005; index++) {
+      console.log(index);
+    }
+  });
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("data:text/javascript,export%20default%20()%20%3D%3E%201%3B");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  const { listener, postMessage } = await startWorker();
+
+  await listener({ data: { type: "start", runs: [{ runId: "run-1", processedCode: "" }] } });
+
+  expect(postMessage).toHaveBeenCalledWith({
+    type: "consoleBatch",
+    runId: "run-1",
+    logs: [
+      { level: "log", message: "same", count: 3 },
+      ...Array.from({ length: 999 }, (_, index) => ({ level: "log", message: String(index), count: 1 })),
+      { level: "warn", message: "Message omitted: console capture keeps the first 1000 entries per run", count: 6 },
+    ],
   });
 });
 

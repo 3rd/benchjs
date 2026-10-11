@@ -15,7 +15,7 @@ import {
 import type { BenchmarkRun } from "@/stores/benchmarkStore";
 import type { Implementation } from "@/stores/persistentStore";
 import { CHART_COLORS, chartAxisTick, chartTooltipLabelStyle, chartTooltipStyle } from "@/lib/chart-style";
-import { formatCount, formatCountShort, formatDuration } from "@/lib/formatters";
+import { formatCountShort, formatDuration, formatOps } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -192,7 +192,7 @@ export function ShareDialog({ implementations, runs, shareUrl, open, onOpenChang
                           <Tooltip
                             contentStyle={chartTooltipStyle}
                             cursor={{ fill: CHART_COLORS.grid, fillOpacity: 0.4 }}
-                            formatter={(value) => `${formatCount(Number(value))} ops/sec`}
+                            formatter={(value) => `${formatOps(Number(value))} ops/sec`}
                             labelStyle={chartTooltipLabelStyle}
                           />
                           <Bar
@@ -229,12 +229,12 @@ export function ShareDialog({ implementations, runs, shareUrl, open, onOpenChang
                               <TableRow key={item.name}>
                                 <TableCell className="py-2 font-medium">{item.name}</TableCell>
                                 <TableCell className="py-2 text-right">
-                                  {formatCount(item.opsPerSecond)}
+                                  {formatOps(item.opsPerSecond)}
                                 </TableCell>
                                 <TableCell className="py-2 text-right">
                                   {formatDuration(item.averageTime)}
                                 </TableCell>
-                                <TableCell className="py-2 text-right">{item.p95.toFixed(2)}ms</TableCell>
+                                <TableCell className="py-2 text-right">{formatDuration(item.p95)}</TableCell>
                               </TableRow>
                             ))}
                           </TableBody>

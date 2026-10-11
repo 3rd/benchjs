@@ -231,6 +231,11 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
                 store.renameImplementation(item.id, trimmedName);
               },
               onDelete: () => {
+                const deletedTab = monacoTabs.tabs.find((tab) => tab.id === item.id);
+                if (deletedTab) {
+                  monacoTabs.closeTab(deletedTab);
+                }
+
                 store.removeImplementation(item.id);
               },
               onDuplicate: () => {
@@ -362,18 +367,16 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
   }, [layout, setCodeViewLayout]);
   const handleCollapseRunPanel = useCallback(() => {
     runPanelRef.current?.collapse();
-    setIsRunPanelCollapsed(true);
   }, []);
   const handleExpandRunPanel = useCallback(() => {
     runPanelRef.current?.expand();
-    setIsRunPanelCollapsed(false);
   }, []);
 
   return (
     <ResizablePanelGroup className="flex flex-1 w-full" direction="horizontal">
       <ResizablePanel className={cn("flex")} defaultSize={defaultSidebarSize} id="file-tree-panel">
         {/* left - file tree */}
-        <div className="flex-1 px-1 h-full text-sm bg-muted border-r-2 border-border">
+        <div className="flex-1 px-1 h-full text-sm bg-muted">
           <div className="p-2 font-medium uppercase">Code</div>
           <FileTree
             activeFileId={monacoTabs.activeTabId || undefined}
@@ -429,6 +432,8 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
                 minSize={10}
                 order={2}
                 collapsible
+                onCollapse={() => setIsRunPanelCollapsed(true)}
+                onExpand={() => setIsRunPanelCollapsed(false)}
               >
                 <RunPanel
                   activeTab={activeRunPanelTab}
@@ -450,7 +455,10 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
                   layout={layout}
                   isCollapsed
                   onLayoutChange={handleLayoutChange}
-                  onTabChange={(tab) => setActiveRunPanelTab(tab as "console" | "run")}
+                  onTabChange={(tab) => {
+                    setActiveRunPanelTab(tab as "console" | "run");
+                    handleExpandRunPanel();
+                  }}
                   onToggleCollapse={handleExpandRunPanel}
                 />
               )}

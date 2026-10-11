@@ -69,30 +69,19 @@ export const useMonacoTabs = (
 
   const closeTab = useCallback(
     (tab: MonacoTab) => {
-      let nextActiveTabId: string | null = null;
-      let hasNoOpenTabs = false;
-      setTabs((prev) => {
-        const filtered = prev.filter((item) => item.id !== tab.id);
-        if (filtered.length === 0) {
-          hasNoOpenTabs = true;
-        } else if (tab.active) {
-          filtered[filtered.length - 1].active = true;
-          nextActiveTabId = filtered[filtered.length - 1].id;
-        }
-        return filtered;
-      });
-
+      const remainingTabs = tabs.filter((item) => item.id !== tab.id);
+      setTabs(remainingTabs);
       options?.onTabClose?.(tab.id);
 
-      if (hasNoOpenTabs) {
-        const newTab = { id: README_FILE_ID, name: README_FILE_ID, active: true };
-        setTabs((prev) => [...prev.map((item) => ({ ...item, active: false })), newTab]);
-        changeTab(newTab);
-      } else if (nextActiveTabId) {
-        changeTab(nextActiveTabId);
+      if (remainingTabs.length === 0) {
+        const readmeTab = { id: README_FILE_ID, name: README_FILE_ID, active: true };
+        setTabs([readmeTab]);
+        changeTab(readmeTab);
+      } else if (tab.active) {
+        changeTab(remainingTabs[remainingTabs.length - 1]);
       }
     },
-    [changeTab, options],
+    [changeTab, options, tabs],
   );
 
   const closeOtherTabs = useCallback(

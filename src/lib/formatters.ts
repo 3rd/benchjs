@@ -20,7 +20,9 @@ export const formatCount = (num: number): string => {
 export const formatCountShort = (value: number): string => {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
-  return value.toString();
+  if (value >= 10) return Math.round(value).toString();
+
+  return Number.parseFloat(value.toFixed(2)).toString();
 };
 
 export const formatOps = (value: number | null): string => {

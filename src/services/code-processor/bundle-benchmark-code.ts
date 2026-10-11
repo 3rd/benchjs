@@ -230,6 +230,92 @@ export const stripExportsPlugin: PluginItem = () => ({
   },
 });
 
+interface ImplementationNames {
+  declared: ReadonlySet<string>;
+  used: ReadonlySet<string>;
+}
+
+const collectImplementationNames = (userCode: string, filename = "main.tsx") => {
+  const declared = new Set<string>();
+  const used = new Set<string>();
+
+  Babel.transform(userCode, {
+    filename,
+    babelrc: false,
+    configFile: false,
+    sourceType: "module",
+    presets: ["typescript"],
+    code: false,
+    plugins: [
+      () => ({
+        name: "collect-implementation-names",
+        visitor: {
+          Program: {
+            exit(path) {
+              path.scope.crawl();
+
+              for (const name of Object.keys(path.scope.bindings)) {
+                declared.add(name);
+                used.add(name);
+              }
+
+              for (const name of Object.keys(path.scope.globals)) {
+                used.add(name);
+              }
+            },
+          },
+        },
+      }),
+    ],
+  });
+
+  return { declared, used } satisfies ImplementationNames;
+};
+
+const buildSetupIsolationPlugin = (implementationNames: ImplementationNames) => {
+  const plugin: PluginItem = () => ({
+    name: "setup-isolation",
+    visitor: {
+      Program: {
+        exit(path) {
+          path.scope.crawl();
+
+          for (const [name, binding] of Object.entries(path.scope.bindings)) {
+            const declaration =
+              binding.path.isVariableDeclarator() ? binding.path.parentPath?.parentPath : binding.path.parentPath;
+            const isExported =
+              declaration?.isExportNamedDeclaration() === true ||
+              binding.referencePaths.some((reference) => reference.parentPath?.isExportSpecifier() === true);
+            const isSetupGlobal = isExported && !implementationNames.declared.has(name);
+            if (isSetupGlobal) continue;
+
+            let isolatedName = path.scope.generateUid(name);
+
+            while (implementationNames.used.has(isolatedName)) {
+              isolatedName = path.scope.generateUid(name);
+            }
+
+            path.scope.rename(name, isolatedName);
+          }
+        },
+      },
+    },
+  });
+  return plugin;
+};
+
+const isolateSetupCode = async (
+  setupCode: string,
+  libraries: Library[],
+  implementationNames: ImplementationNames,
+) => {
+  const isolatedSetupCode = await transform(setupCode, "setup.ts", [
+    buildImportTransformPlugin(libraries),
+    buildSetupIsolationPlugin(implementationNames),
+  ]);
+  return transform(isolatedSetupCode, "setup.ts", [stripExportsPlugin]);
+};
+
 export const bundleBenchmarkCode = async (
   userCode: string,
   setupCode: string,
@@ -238,7 +324,10 @@ export const bundleBenchmarkCode = async (
 ) => {
   await esbuildPromise;
 
-  const normalizedCode = await transform(`${setupCode}\n\n${userCode}`, filename, [
+  const implementationNames = collectImplementationNames(userCode, filename);
+  const setupModuleCode = await isolateSetupCode(setupCode, libraries, implementationNames);
+  const strippedUserCode = await transform(userCode, filename);
+  const normalizedCode = await transform(`${setupModuleCode}\n\n${strippedUserCode}`, filename, [
     buildImportTransformPlugin(libraries),
     runFunctionProcessorPlugin,
     stripExportsPlugin,

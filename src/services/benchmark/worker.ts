@@ -8,6 +8,8 @@ import { MainToWorkerMessage, WorkerToMainMessage } from "./types";
 const log = console.log;
 
 const CONSOLE_FLUSH_INTERVAL_MS = 500;
+const MAX_CONSOLE_ENTRIES_PER_RUN = 1000;
+const OMITTED_CONSOLE_MESSAGE = `Message omitted: console capture keeps the first ${MAX_CONSOLE_ENTRIES_PER_RUN} entries per run`;
 // auto mode emits one progress event per measured block (thousands per second for
 // fast tasks) and fixed mode one per whole percent; forwarding each one floods the
 // main thread, so updates are coalesced
@@ -32,6 +34,8 @@ interface LogEntry {
 let currentRunId: string | null = null;
 let lastFlushTimestamp = 0;
 const logsBuffer: LogEntry[] = [];
+const capturedEntryCounts = new Map<string, number>();
+
 const flushLogs = (force = false) => {
   if (logsBuffer.length === 0 || !currentRunId) return;
   const now = Date.now();
@@ -47,6 +51,75 @@ const flushLogs = (force = false) => {
   lastFlushTimestamp = now;
 };
 
+const bufferLog = (level: LogEntry["level"], message: string) => {
+  const lastLog = logsBuffer[logsBuffer.length - 1];
+  const isRepeatOfLastLog = lastLog !== undefined && lastLog.level === level && lastLog.message === message;
+  if (isRepeatOfLastLog) {
+    lastLog.count = lastLog.count + 1;
+    return false;
+  }
+
+  logsBuffer.push({ level, message, count: 1 });
+  return true;
+};
+
+// console argument formatting
+const createJsonReplacer = () => {
+  const ancestors: unknown[] = [];
+
+  return function (this: unknown, _key: string, value: unknown) {
+    if (typeof value === "bigint") return `${value}n`;
+
+    const isObject = typeof value === "object" && value !== null;
+    if (!isObject) return value;
+
+    ancestors.splice(ancestors.indexOf(this) + 1);
+
+    if (ancestors.includes(value)) return "[Circular]";
+
+    ancestors.push(value);
+    return value;
+  };
+};
+
+const formatConsoleValue = (value: unknown, ancestors: readonly unknown[]): string => {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "bigint") return `${value}n`;
+  if (typeof value === "function") return value.name ? `[Function: ${value.name}]` : "[Function]";
+
+  const isPrimitive = typeof value !== "object" || value === null;
+  if (isPrimitive) return String(value);
+
+  if (value instanceof Error) return String(value);
+
+  const isCollection = value instanceof Map || value instanceof Set;
+  if (isCollection) {
+    if (ancestors.includes(value)) return "[Circular]";
+
+    const entryAncestors = [...ancestors, value];
+    const formatEntry = (entry: unknown) => formatConsoleValue(entry, entryAncestors);
+
+    if (value instanceof Map) {
+      const entries = [...value].map(([key, entry]) => `${formatEntry(key)} => ${formatEntry(entry)}`);
+      return `Map(${value.size}) {${entries.join(", ")}}`;
+    }
+
+    return `Set(${value.size}) {${[...value].map(formatEntry).join(", ")}}`;
+  }
+
+  return JSON.stringify(value, createJsonReplacer());
+};
+
+const formatConsoleArgument = (arg: unknown) => {
+  if (typeof arg === "string") return arg;
+
+  try {
+    return formatConsoleValue(arg, []);
+  } catch {
+    return "[Unserializable]";
+  }
+};
+
 // patch console methods
 const patchConsole = (runId: string, prevent = false) => {
   currentRunId = runId;
@@ -57,14 +130,18 @@ const patchConsole = (runId: string, prevent = false) => {
     (console[level] as any) = function (...args: unknown[]) {
       if (prevent) return;
 
-      const message = args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" ");
+      const capturedEntryCount = capturedEntryCounts.get(runId) ?? 0;
+      if (capturedEntryCount < MAX_CONSOLE_ENTRIES_PER_RUN) {
+        const message = args.map(formatConsoleArgument).join(" ");
 
-      const lastLog = logsBuffer[logsBuffer.length - 1];
-      if (lastLog && lastLog.level === level && lastLog.message === message) {
-        lastLog.count = lastLog.count + 1;
+        const isNewEntry = bufferLog(level, message);
+        if (isNewEntry) {
+          capturedEntryCounts.set(runId, capturedEntryCount + 1);
+        }
       } else {
-        logsBuffer.push({ level, message, count: 1 });
+        bufferLog("warn", OMITTED_CONSOLE_MESSAGE);
       }
+
       flushLogs();
     };
   }
@@ -243,6 +320,8 @@ const handleStartRuns = async (
     for (const run of runs) {
       const blob = new Blob([run.processedCode], { type: "text/javascript" });
       const blobUrl = URL.createObjectURL(blob);
+      patchConsole(run.runId);
+
       try {
         const module = await import(/* @vite-ignore */ blobUrl);
         const benchmarkFn = module.default;
@@ -253,6 +332,7 @@ const handleStartRuns = async (
         runner.add(run.runId, benchmarkFn as () => void);
       } finally {
         URL.revokeObjectURL(blobUrl);
+        flushLogs(true);
       }
     }
 

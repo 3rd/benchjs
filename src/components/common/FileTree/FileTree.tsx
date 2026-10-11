@@ -78,7 +78,13 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
           "flex items-center min-h-8 px-2 hover:bg-accent cursor-pointer rounded group relative",
           isActive && "bg-accent",
         )}
+        role={editingName ? undefined : "button"}
         style={{ paddingLeft: `${(level + 1) * 10}px` }}
+        onClick={() => {
+          if (editingName) return;
+
+          onFileClick?.(item);
+        }}
         onContextMenu={(e) => {
           if (item.actions?.onRename ?? item.actions?.onDelete) {
             e.preventDefault();
@@ -136,11 +142,7 @@ export const FileTree = ({ item, level = 0, onFileClick, activeFileId }: FileTre
               )}
             </div>
             // render mode
-          : <div
-              className="flex justify-between items-center w-full"
-              role="button"
-              onClick={() => onFileClick?.(item)}
-            >
+          : <div className="flex justify-between items-center w-full">
               {/* name */}
               <span className={cn("truncate flex-1 text-sm text-left", isActive && "font-medium")}>
                 {item.name}

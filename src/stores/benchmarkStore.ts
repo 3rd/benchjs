@@ -84,11 +84,11 @@ export const useBenchmarkStore = create<BenchmarkState>()(
     addRuns: (runs) =>
       set((state) => {
         const updatedRuns = { ...state.runs };
+
         for (const run of runs) {
-          const updatedImplementationRuns = updatedRuns[run.implementationId] || [];
-          updatedImplementationRuns.push(run);
-          updatedRuns[run.implementationId] = updatedImplementationRuns;
+          updatedRuns[run.implementationId] = [...(updatedRuns[run.implementationId] ?? []), run];
         }
+
         return { runs: updatedRuns };
       }),
     updateRun: (id, data) =>
@@ -257,8 +257,11 @@ export const useBenchmarkStore = create<BenchmarkState>()(
         for (const log of newLogs) {
           const lastLog = updatedLogs[updatedLogs.length - 1];
           if (lastLog && lastLog.level === log.level && lastLog.message === log.message) {
-            lastLog.count += log.count;
-            lastLog.timestamp = log.timestamp;
+            updatedLogs[updatedLogs.length - 1] = {
+              ...lastLog,
+              count: lastLog.count + log.count,
+              timestamp: log.timestamp,
+            };
           } else {
             updatedLogs.push({ ...log, count: log.count });
           }

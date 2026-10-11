@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Download, Loader2, PlayIcon } from "lucide-react";
+import { Loader2, PlayIcon, Share2Icon } from "lucide-react";
 import { useBenchmarkStore } from "@/stores/benchmarkStore";
 import { getCurrentDocument, Implementation, usePersistentStore } from "@/stores/persistentStore";
 import { benchmarkService } from "@/services/benchmark/benchmark-service";
-import { ExportModal } from "@/components/ExportModal";
 import { ComparisonChart } from "@/components/playground/compare/ComparisonChart/ComparisonChart";
 import { ComparisonTable } from "@/components/playground/compare/ComparisonTable";
 import { Button } from "@/components/ui/button";
@@ -17,10 +16,12 @@ interface ExtendedImplementation extends Implementation {
   content: string;
 }
 
-export const CompareView = () => {
+interface CompareViewProps {
+  onShare: () => void;
+}
+
+export const CompareView = ({ onShare }: CompareViewProps) => {
   const [implementations, setImplementations] = useState<ExtendedImplementation[]>([]);
-  const [showExportModal, setShowExportModal] = useState(false);
-  const [exportData, setExportData] = useState("");
   const store = useBenchmarkStore();
   const persistentStore = usePersistentStore();
   const currentDocument = getCurrentDocument(persistentStore);
@@ -29,7 +30,7 @@ export const CompareView = () => {
     setImplementations((prev) =>
       currentDocument.implementations.map((item) => ({
         ...item,
-        selected: prev.some((curr) => curr.id === item.id),
+        selected: prev.find((curr) => curr.id === item.id)?.selected ?? false,
       })),
     );
   }, [currentDocument.implementations]);
@@ -63,33 +64,9 @@ export const CompareView = () => {
     [currentDocument.setupCode],
   );
 
-  const handleExportResults = () => {
-    const resultsData = implementations
-      .filter((impl) => {
-        const run = store.runs[impl.id]?.at(-1);
-        return run?.result;
-      })
-      .map((impl) => {
-        const run = store.runs[impl.id]?.at(-1);
-        return {
-          name: impl.filename,
-          totalTime: run?.elapsedTime,
-          opsPerSec: run?.result?.stats.operationsPerSecond.average,
-        };
-      });
-
-    setExportData(JSON.stringify(resultsData, null, 2));
-    setShowExportModal(true);
-  };
-
   const isRunning = implementations.some((item) => {
     const run = store.runs[item.id]?.at(-1);
     return run?.status === "running" || run?.status === "warmup";
-  });
-
-  const hasResults = implementations.some((item) => {
-    const run = store.runs[item.id]?.at(-1);
-    return Boolean(run?.result);
   });
 
   return (
@@ -108,10 +85,10 @@ export const CompareView = () => {
               <CardTitle className="flex justify-between items-center">
                 <span>Implementations</span>
                 <div className="flex items-center space-x-2">
-                  {/* export */}
-                  <Button disabled={!hasResults} variant="outline" onClick={handleExportResults}>
-                    <Download className="w-4 h-4" />
-                    Export Results
+                  {/* share */}
+                  <Button className="gap-2" variant="outline" onClick={onShare}>
+                    <Share2Icon className="w-4 h-4" />
+                    Share Results
                   </Button>
 
                   {/* run */}
@@ -154,8 +131,6 @@ export const CompareView = () => {
           </Card>
         </motion.div>
       </AnimatePresence>
-
-      <ExportModal isOpen={showExportModal} value={exportData} onOpenChange={setShowExportModal} />
     </div>
   );
 };

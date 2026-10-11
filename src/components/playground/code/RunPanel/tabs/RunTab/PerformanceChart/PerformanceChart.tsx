@@ -20,6 +20,8 @@ type PhaseRegion = {
   end: number;
 };
 
+const RESIZE_THROTTLE_MS = 200;
+
 const PHASE_FILLS: Record<PhaseRegion["phase"], string> = {
   warmup: CHART_COLORS.label,
   assessment: CHART_COLORS.label,
@@ -63,8 +65,8 @@ export const PerformanceChart = ({ chartData, isRunning, averageOpsPerSecond }: 
   const useLogScale = points.length > 1;
 
   return (
-    <div className="h-[220px]">
-      <ResponsiveContainer height="100%" width="100%">
+    <div className="overflow-hidden h-[220px]">
+      <ResponsiveContainer debounce={RESIZE_THROTTLE_MS} height="100%" width="100%">
         <LineChart data={points} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
           <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" />
           <XAxis

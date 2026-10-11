@@ -2,7 +2,6 @@ import { Info, Square } from "lucide-react";
 import { BenchmarkRun } from "@/stores/benchmarkStore";
 import { Implementation } from "@/stores/persistentStore";
 import { formatCount, formatDuration } from "@/lib/formatters";
-import { cn } from "@/lib/utils";
 import { isRankingEligible } from "@/components/playground/compare/comparison-ranking";
 import { getOpsPerSecond } from "@/components/playground/compare/comparison-rate";
 import { Button } from "@/components/ui/button";
@@ -36,14 +35,15 @@ interface ImplementationRun {
 const calculateRunMetrics = (runs: ImplementationRun[]): Map<string, RunMetrics> => {
   const metrics = new Map<string, RunMetrics>();
   const rankable = isRankingEligible(runs);
+  const finishedRuns = runs.filter((item) => item.run?.status === "completed");
 
   let best = 0;
-  for (const item of runs) {
+  for (const item of finishedRuns) {
     const runOpsPerSecond = getOpsPerSecond(item.run);
     if (runOpsPerSecond > best) best = runOpsPerSecond;
   }
 
-  for (const item of runs) {
+  for (const item of finishedRuns) {
     const opsPerSecond = getOpsPerSecond(item.run);
     if (opsPerSecond <= 0) continue;
     metrics.set(item.implementation.id, {
@@ -53,6 +53,21 @@ const calculateRunMetrics = (runs: ImplementationRun[]): Map<string, RunMetrics>
     });
   }
   return metrics;
+};
+
+const OPS_PER_SECOND_CLASS_NAMES = {
+  provisional: "font-medium text-blue-600",
+  best: "font-semibold text-green-600",
+  settled: "font-medium text-orange-600",
+};
+
+const getOpsPerSecondState = (run: BenchmarkRun, metrics: RunMetrics | undefined) => {
+  const isActiveRun = run.status === "running" || run.status === "warmup";
+  if (isActiveRun) return "provisional";
+
+  if (metrics?.isBest) return "best";
+
+  return "settled";
 };
 
 const OpsPerSecondCell = ({
@@ -67,22 +82,14 @@ const OpsPerSecondCell = ({
   const opsPerSecond = getOpsPerSecond(run);
   if (opsPerSecond === 0) return <span>-</span>;
 
-  const isRunning = run.status === "running";
+  const state = getOpsPerSecondState(run, metrics);
+  const shouldShowDeficit = state === "settled" && metrics !== undefined && metrics.percentageDiff > 0;
 
   return (
     <div className="flex gap-2 items-center">
-      <span
-        className={cn(
-          "font-medium",
-          isRunning && "text-blue-600",
-          metrics?.isBest && "font-semibold text-green-600",
-          !metrics?.isBest && "text-orange-600",
-        )}
-      >
-        {formatCount(Math.round(opsPerSecond))}
-      </span>
-      {metrics?.isBest && <span className="text-xs font-medium text-green-600">Best</span>}
-      {metrics && !metrics.isBest && metrics.percentageDiff > 0 && (
+      <span className={OPS_PER_SECOND_CLASS_NAMES[state]}>{formatCount(Math.round(opsPerSecond))}</span>
+      {state === "best" && <span className="text-xs font-medium text-green-600">Best</span>}
+      {shouldShowDeficit && (
         <span className="text-xs text-muted-foreground">(-{metrics.percentageDiff.toFixed(1)}%)</span>
       )}
     </div>

@@ -21,9 +21,10 @@ export const transform = async (code: string, filename?: string, plugins: Plugin
     ast: true,
   });
 
-  if (!result || !result.code) {
+  const transformedCode = result?.code;
+  if (transformedCode == null) {
     throw new Error("Failed to transform code");
   }
 
-  return format(result.code.trim());
+  return format(transformedCode.trim());
 };

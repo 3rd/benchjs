@@ -509,7 +509,6 @@ export const Monaco = ({
             beforeMount={handleBeforeMount}
             className={cn("nodrag h-full", className)}
             path={activeFilePath}
-            saveViewState={false}
             theme={EDITOR_THEME_NAME}
             onChange={onChange}
             onMount={handleMount}

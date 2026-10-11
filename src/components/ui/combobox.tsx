@@ -88,6 +88,9 @@ export const Combobox = ({
   };
 
   const hasDropdownContent = options.length > 0 || isLoading || Boolean(error) || hasSearched;
+  const areOptionsHidden = isLoading || Boolean(error);
+  const visibleOptions = areOptionsHidden ? [] : options;
+  const hasHighlightedOption = selectedIndex >= 0 && selectedIndex < visibleOptions.length;
 
   const handleInputFocus = () => {
     if (hasDropdownContent) {
@@ -95,8 +98,8 @@ export const Combobox = ({
     }
   };
 
-  const handleSelect = (option: ComboboxOption) => {
-    onSelect(option.value);
+  const handleSelect = (selectedValue: string) => {
+    onSelect(selectedValue);
     setIsOpen(false);
     setSelectedIndex(-1);
   };
@@ -104,64 +107,80 @@ export const Combobox = ({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (disabled) return;
 
+    const canMoveHighlight = isOpen && visibleOptions.length > 0;
+
     switch (e.key) {
       case "ArrowDown": {
         e.preventDefault();
-        if (!isOpen && options.length > 0) {
+
+        if (canMoveHighlight) {
+          setSelectedIndex((prev) => (prev < visibleOptions.length - 1 ? prev + 1 : 0));
+        } else if (visibleOptions.length > 0) {
           setIsOpen(true);
         }
-        if (isOpen && options.length > 0) {
-          setSelectedIndex((prev) => (prev < options.length - 1 ? prev + 1 : 0));
-        }
+
         break;
       }
       case "ArrowUp": {
         e.preventDefault();
-        if (isOpen && options.length > 0) {
-          setSelectedIndex((prev) => (prev > 0 ? prev - 1 : options.length - 1));
+
+        if (canMoveHighlight) {
+          setSelectedIndex((prev) => (prev > 0 ? prev - 1 : visibleOptions.length - 1));
         }
+
         break;
       }
       case "Home": {
         e.preventDefault();
-        if (isOpen && options.length > 0) {
+
+        if (canMoveHighlight) {
           setSelectedIndex(0);
         }
+
         break;
       }
       case "End": {
         e.preventDefault();
-        if (isOpen && options.length > 0) {
-          setSelectedIndex(options.length - 1);
+
+        if (canMoveHighlight) {
+          setSelectedIndex(visibleOptions.length - 1);
         }
+
         break;
       }
       case "PageDown": {
         e.preventDefault();
-        if (isOpen && options.length > 0) {
+
+        if (canMoveHighlight) {
           const pageSize = 5;
-          setSelectedIndex((prev) => Math.min(prev + pageSize, options.length - 1));
+          setSelectedIndex((prev) => Math.min(prev + pageSize, visibleOptions.length - 1));
         }
+
         break;
       }
       case "PageUp": {
         e.preventDefault();
-        if (isOpen && options.length > 0) {
+
+        if (canMoveHighlight) {
           const pageSize = 5;
           setSelectedIndex((prev) => Math.max(prev - pageSize, 0));
         }
+
         break;
       }
       case "Enter": {
         e.preventDefault();
-        if (selectedIndex >= 0 && selectedIndex < options.length) {
-          handleSelect(options[selectedIndex]);
-        } else if (options.length === 1) {
-          handleSelect(options[0]);
-        } else if (options.length > 0 && selectedIndex === -1) {
+        const shouldSelectFirstOption = visibleOptions.length === 1 || selectedIndex === -1;
+
+        if (hasHighlightedOption) {
+          handleSelect(visibleOptions[selectedIndex].value);
+        } else if (visibleOptions.length === 0) {
+          handleSelect(value);
+        } else if (shouldSelectFirstOption) {
           // select first option if none selected
-          handleSelect(options[0]);
+          handleSelect(visibleOptions[0].value);
         }
+
         break;
       }
       case "Escape": {
@@ -178,10 +197,8 @@ export const Combobox = ({
   };
 
   const showDropdown = isOpen && hasDropdownContent;
-  const activeOptionId =
-    showDropdown && selectedIndex >= 0 && selectedIndex < options.length ?
-      getOptionId(selectedIndex)
-    : undefined;
+  const isHighlightedOptionShown = showDropdown && hasHighlightedOption;
+  const activeOptionId = isHighlightedOptionShown ? getOptionId(selectedIndex) : undefined;
 
   return (
     <div ref={containerRef} className={cn("relative w-full", className)}>
@@ -236,9 +253,9 @@ export const Combobox = ({
             <div className="p-4 text-sm text-muted-foreground text-center">{EMPTY_RESULTS_MESSAGE}</div>
           )}
 
-          {!isLoading && !error && options.length > 0 && (
+          {visibleOptions.length > 0 && (
             <div className="p-1">
-              {options.map((option, index) => (
+              {visibleOptions.map((option, index) => (
                 <div
                   key={option.value}
                   ref={(el) => {
@@ -253,7 +270,7 @@ export const Combobox = ({
                     "focus:bg-accent focus:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
                     selectedIndex === index && "bg-accent text-accent-foreground",
                   )}
-                  onClick={() => handleSelect(option)}
+                  onClick={() => handleSelect(option.value)}
                   onMouseEnter={() => setSelectedIndex(index)}
                 >
                   <div className="flex items-start justify-between gap-4">

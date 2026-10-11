@@ -62,6 +62,7 @@ export const RunPanelTabs = ({
             <TabsTrigger
               className="data-[state=active]:bg-background border-t-2 border-t-transparent data-[state=active]:border-t-brand px-4 rounded-none border-r border-border py-1.5 flex items-center gap-1 h-full"
               value="run"
+              onClick={isCollapsed ? () => onTabChange("run") : undefined}
             >
               <FlameIcon className="w-4 h-4" />
               <span>Run</span>
@@ -69,6 +70,7 @@ export const RunPanelTabs = ({
             <TabsTrigger
               className="data-[state=active]:bg-background border-t-2 border-t-transparent data-[state=active]:border-t-brand px-4 rounded-none border-r border-border py-1.5 flex items-center gap-1 h-full"
               value="console"
+              onClick={isCollapsed ? () => onTabChange("console") : undefined}
             >
               <SquareChevronRightIcon className="w-4 h-4" />
               <span>Console</span>
@@ -156,7 +158,6 @@ const RunPanelComponent = ({
   );
 
   const [internalActiveTab, setInternalActiveTab] = useState<RunPanelTab>("run");
-  const [isCollapsed, setIsCollapsed] = useState(false);
   const isRunning = latestRun?.status === "running" || latestRun?.status === "warmup";
 
   const activeTab = externalActiveTab ?? internalActiveTab;
@@ -173,11 +174,6 @@ const RunPanelComponent = ({
     onRun?.();
   };
 
-  const handleToggleCollapse = () => {
-    setIsCollapsed(!isCollapsed);
-    onToggleCollapse?.();
-  };
-
   return (
     <>
       <RunPanelTabs
@@ -186,7 +182,7 @@ const RunPanelComponent = ({
         layout={layout}
         onLayoutChange={onLayoutChange}
         onTabChange={handleSetTab}
-        onToggleCollapse={handleToggleCollapse}
+        onToggleCollapse={onToggleCollapse}
       >
         <div className="overflow-y-auto h-full pb-2">
           {/* forceMount keeps the chart mounted across tab switches; remounting recharts is slow */}
