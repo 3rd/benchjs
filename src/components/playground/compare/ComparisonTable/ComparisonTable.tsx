@@ -4,6 +4,7 @@ import { Implementation } from "@/stores/persistentStore";
 import { formatCount, formatDuration } from "@/lib/formatters";
 import { isRankingEligible } from "@/components/playground/compare/comparison-ranking";
 import { getOpsPerSecond } from "@/components/playground/compare/comparison-rate";
+import { getResultEvidence } from "@/components/playground/result-evidence";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
@@ -70,27 +71,50 @@ const getOpsPerSecondState = (run: BenchmarkRun, metrics: RunMetrics | undefined
   return "settled";
 };
 
-const OpsPerSecondCell = ({
-  run,
-  metrics,
-}: {
+interface OpsPerSecondCellProps {
   run: BenchmarkRun | undefined;
   metrics: RunMetrics | undefined;
-}) => {
+}
+
+const OpsPerSecondCell = ({ run, metrics }: OpsPerSecondCellProps) => {
   if (!run) return <span>-</span>;
 
   const opsPerSecond = getOpsPerSecond(run);
-  if (opsPerSecond === 0) return <span>-</span>;
+  const completedResult = run.status === "completed" ? run.result : null;
+  const evidence = completedResult ? getResultEvidence(completedResult) : null;
+  const shouldHideRateDetails = opsPerSecond === 0 && !evidence?.label;
+  if (shouldHideRateDetails) return <span>-</span>;
 
   const state = getOpsPerSecondState(run, metrics);
   const shouldShowDeficit = state === "settled" && metrics !== undefined && metrics.percentageDiff > 0;
 
   return (
-    <div className="flex gap-2 items-center">
-      <span className={OPS_PER_SECOND_CLASS_NAMES[state]}>{formatCount(Math.round(opsPerSecond))}</span>
-      {state === "best" && <span className="text-xs font-medium text-green-600">Best</span>}
-      {shouldShowDeficit && (
-        <span className="text-xs text-muted-foreground">(-{metrics.percentageDiff.toFixed(1)}%)</span>
+    <div className="space-y-1">
+      <div className="flex gap-2 items-center">
+        <span className={OPS_PER_SECOND_CLASS_NAMES[state]}>
+          {opsPerSecond > 0 ? formatCount(Math.round(opsPerSecond)) : "-"}
+        </span>
+        {state === "best" && <span className="text-xs font-medium text-green-600">Best</span>}
+        {shouldShowDeficit && (
+          <span className="text-xs text-muted-foreground">(-{metrics.percentageDiff.toFixed(1)}%)</span>
+        )}
+      </div>
+      {evidence?.label && (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger
+              aria-label={`${evidence.label} (${evidence.status}). ${evidence.description ?? ""}`}
+              className="flex gap-1 items-center text-xs text-amber-600 dark:text-amber-400"
+            >
+              {evidence.label}
+              <Info className="w-3 h-3" />
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">
+              <p>{evidence.status}</p>
+              <p>{evidence.description}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       )}
     </div>
   );

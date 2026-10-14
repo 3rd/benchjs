@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+import ts from "typescript";
 import {
   generateSetupDeclarations,
   getCurrentSetupDeclarationContent,
@@ -15,6 +17,62 @@ const createDeferred = <Value>() => {
 };
 
 describe("setup declaration generation", () => {
+  it("exposes direct exports and writable aliases while hiding their private local names", async () => {
+    const options: ts.CompilerOptions = {
+      declaration: true,
+      emitDeclarationOnly: true,
+      noLib: true,
+      skipLibCheck: true,
+      types: [],
+      target: ts.ScriptTarget.ESNext,
+      module: ts.ModuleKind.ESNext,
+    };
+    const sources = new Map([
+      ["/setup.ts", `export let count = 1; let value = 7; let same = 0; export { count as calls, value as answer, value as "quoted", same };`],
+    ]);
+    const host = ts.createCompilerHost(options);
+    host.getSourceFile = (filename, languageVersion) => {
+      const content = sources.get(filename);
+      assert.ok(content !== undefined, `Missing source fixture: ${filename}`);
+
+      return ts.createSourceFile(filename, content, languageVersion, true);
+    };
+    host.writeFile = (filename, content) => sources.set(filename, content);
+    ts.createProgram(["/setup.ts"], options, host).emit();
+
+    const emittedDeclarations = sources.get("/setup.d.ts");
+    assert.ok(emittedDeclarations !== undefined, "Setup declarations were not emitted");
+
+    const declarations = await generateSetupDeclarations({
+      dependencyService: { syncLibraries: async () => {} },
+      emitDeclarations: async () => emittedDeclarations,
+      isCurrent: () => true,
+      libraries: [],
+    });
+    assert.ok(declarations !== null, "Setup declarations were not generated");
+
+    sources.set("/setup.d.ts", declarations);
+    sources.set("/implementation.ts", `
+      export const run = () => {
+        count++;
+        calls++;
+        answer++;
+        quoted++;
+        same++;
+        return [count, calls, answer];
+      };
+      export const leaked = value;
+    `);
+
+    const program = ts.createProgram(["/setup.d.ts", "/implementation.ts"], options, host);
+    const diagnostics = program.getSemanticDiagnostics().map((diagnostic) => ({
+      code: diagnostic.code,
+      message: ts.flattenDiagnosticMessageText(diagnostic.messageText, " "),
+    }));
+
+    expect(diagnostics).toEqual([{ code: 2304, message: "Cannot find name 'value'." }]);
+  });
+
   it("waits for dependency types before emitting declarations", async () => {
     const dependencyTypes = createDeferred<void>();
     let inferredType = "any";
@@ -35,7 +93,7 @@ describe("setup declaration generation", () => {
     dependencyTypes.resolve(undefined);
 
     await expect(generation).resolves.toBe(`declare global {
-  declare const value: string;
+  export declare const value: string;
 }
 
 export {};`);
@@ -73,7 +131,7 @@ export {};`);
 
     await expect(generation).resolves.toBe(`declare global {
   export type { Shared } from "package";
-  type Local = number;
+  export type Local = number;
 }
 
 export {};`);

@@ -223,6 +223,16 @@ export const benchmarkService = {
         // setup worker
         const sessionWorker = new BenchmarkWorker();
         session.worker = sessionWorker;
+        sessionWorker.addEventListener("error", (event: ErrorEvent) => {
+          if (!isActiveSession(session)) return;
+
+          store.terminalizeRuns(
+            session.runIds,
+            "failed",
+            event.message || "Failed to start benchmark worker",
+          );
+          session.settle([]);
+        });
         document.addEventListener("visibilitychange", handleVisibilityChange);
         heartbeat = setInterval(() => {
           const now = Date.now();

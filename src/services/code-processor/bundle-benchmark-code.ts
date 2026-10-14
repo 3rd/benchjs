@@ -109,15 +109,18 @@ export const runFunctionProcessorPlugin: PluginItem = () => ({
       }
 
       // if "export const run = (...) => { ... }" or "export const run = function(...) {...}"
-      if (
-        t.isVariableDeclaration(declaration) &&
-        declaration.declarations.length === 1 &&
-        t.isVariableDeclarator(declaration.declarations[0]) &&
-        t.isIdentifier(declaration.declarations[0].id, { name: "run" })
-      ) {
-        const init = declaration.declarations[0].init;
+      if (t.isVariableDeclaration(declaration)) {
+        const runDeclaration = declaration.declarations.find((item) =>
+          t.isIdentifier(item.id, { name: "run" }),
+        );
+        if (!runDeclaration) return;
+
+        const init = runDeclaration.init;
         if (t.isArrowFunctionExpression(init) || t.isFunctionExpression(init)) {
-          if (t.isFunctionExpression(init) && init.id) {
+          const shouldPreserveDeclaration =
+            declaration.declarations.length > 1 ||
+            (t.isFunctionExpression(init) && init.id != null);
+          if (shouldPreserveDeclaration) {
             const replacementPaths = path.replaceWithMultiple([
               declaration,
               t.exportDefaultDeclaration(t.identifier("run")),
@@ -250,17 +253,15 @@ const collectImplementationNames = (userCode: string, filename = "main.tsx") => 
       () => ({
         name: "collect-implementation-names",
         visitor: {
+          Identifier(path) {
+            used.add(path.node.name);
+          },
           Program: {
             exit(path) {
               path.scope.crawl();
 
               for (const name of Object.keys(path.scope.bindings)) {
                 declared.add(name);
-                used.add(name);
-              }
-
-              for (const name of Object.keys(path.scope.globals)) {
-                used.add(name);
               }
             },
           },
@@ -273,6 +274,8 @@ const collectImplementationNames = (userCode: string, filename = "main.tsx") => 
 };
 
 const buildSetupIsolationPlugin = (implementationNames: ImplementationNames) => {
+  const exportedBindings = new Map<string, string>();
+
   const plugin: PluginItem = () => ({
     name: "setup-isolation",
     visitor: {
@@ -283,24 +286,71 @@ const buildSetupIsolationPlugin = (implementationNames: ImplementationNames) => 
           for (const [name, binding] of Object.entries(path.scope.bindings)) {
             const declaration =
               binding.path.isVariableDeclarator() ? binding.path.parentPath?.parentPath : binding.path.parentPath;
-            const isExported =
-              declaration?.isExportNamedDeclaration() === true ||
-              binding.referencePaths.some((reference) => reference.parentPath?.isExportSpecifier() === true);
-            const isSetupGlobal = isExported && !implementationNames.declared.has(name);
-            if (isSetupGlobal) continue;
+            const exportedNames = new Set<string>();
 
-            let isolatedName = path.scope.generateUid(name);
-
-            while (implementationNames.used.has(isolatedName)) {
-              isolatedName = path.scope.generateUid(name);
+            if (declaration?.isExportNamedDeclaration()) {
+              exportedNames.add(name);
             }
 
-            path.scope.rename(name, isolatedName);
+            for (const reference of binding.referencePaths) {
+              const specifier = reference.parentPath;
+              if (!specifier?.isExportSpecifier()) continue;
+
+              const exportedName = specifier.node.exported;
+              exportedNames.add(t.isIdentifier(exportedName) ? exportedName.name : exportedName.value);
+            }
+
+            const canExposeLocalName =
+              exportedNames.size === 1 &&
+              exportedNames.has(name) &&
+              !implementationNames.declared.has(name);
+            let localName = name;
+
+            if (!canExposeLocalName) {
+              localName = path.scope.generateUid(name);
+
+              while (implementationNames.used.has(localName)) {
+                localName = path.scope.generateUid(name);
+              }
+
+              path.scope.rename(name, localName);
+            }
+
+            for (const exportedName of exportedNames) {
+              exportedBindings.set(exportedName, localName);
+            }
           }
         },
       },
     },
   });
+
+  return { plugin, exportedBindings };
+};
+
+const buildSetupReferencePlugin = (exportedBindings: ReadonlyMap<string, string>) => {
+  const plugin: PluginItem = () => ({
+    name: "setup-references",
+    visitor: {
+      Identifier(path) {
+        const name = path.node.name;
+        const localName = exportedBindings.get(name);
+        if (!localName) return;
+
+        const isReference = path.isReferencedIdentifier();
+        const isBinding = path.isBindingIdentifier();
+        const isFreeSetupReference =
+          localName !== name &&
+          !path.scope.getBinding(name) &&
+          (isReference || isBinding);
+        if (!isFreeSetupReference) return;
+
+        path.replaceWith(t.identifier(localName));
+        path.skip();
+      },
+    },
+  });
+
   return plugin;
 };
 
@@ -309,11 +359,13 @@ const isolateSetupCode = async (
   libraries: Library[],
   implementationNames: ImplementationNames,
 ) => {
+  const { plugin, exportedBindings } = buildSetupIsolationPlugin(implementationNames);
   const isolatedSetupCode = await transform(setupCode, "setup.ts", [
     buildImportTransformPlugin(libraries),
-    buildSetupIsolationPlugin(implementationNames),
+    plugin,
   ]);
-  return transform(isolatedSetupCode, "setup.ts", [stripExportsPlugin]);
+  const code = await transform(isolatedSetupCode, "setup.ts", [stripExportsPlugin]);
+  return { code, exportedBindings };
 };
 
 export const bundleBenchmarkCode = async (
@@ -325,9 +377,11 @@ export const bundleBenchmarkCode = async (
   await esbuildPromise;
 
   const implementationNames = collectImplementationNames(userCode, filename);
-  const setupModuleCode = await isolateSetupCode(setupCode, libraries, implementationNames);
-  const strippedUserCode = await transform(userCode, filename);
-  const normalizedCode = await transform(`${setupModuleCode}\n\n${strippedUserCode}`, filename, [
+  const setupModule = await isolateSetupCode(setupCode, libraries, implementationNames);
+  const strippedUserCode = await transform(userCode, filename, [
+    buildSetupReferencePlugin(setupModule.exportedBindings),
+  ]);
+  const normalizedCode = await transform(`${setupModule.code}\n\n${strippedUserCode}`, filename, [
     buildImportTransformPlugin(libraries),
     runFunctionProcessorPlugin,
     stripExportsPlugin,

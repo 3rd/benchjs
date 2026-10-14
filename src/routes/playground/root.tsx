@@ -202,6 +202,18 @@ export default function EditorRoute() {
     resolveDocumentImport("overwrite");
   };
 
+  const handleDeleteDocument = (documentId: string) => {
+    const document = usePersistentStore
+      .getState()
+      .documents.find((savedDocument) => savedDocument.id === documentId);
+    if (!document) return;
+
+    benchmarkService.discardRunsForImplementations(
+      new Set(document.implementations.map((implementation) => implementation.id)),
+    );
+    removeDocument(documentId);
+  };
+
   const dependencyService = useRef(new DependencyService());
   useEffect(() => {
     dependencyService.current.syncLibraries(libraries);
@@ -231,7 +243,7 @@ export default function EditorRoute() {
             currentTitle={currentTitle}
             documents={documents}
             onCreate={createDocument}
-            onDelete={removeDocument}
+            onDelete={handleDeleteDocument}
             onRename={renameDocument}
             onSelect={setCurrentDocumentId}
           />

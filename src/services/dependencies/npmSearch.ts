@@ -178,13 +178,15 @@ export async function searchNpmPackages(
     return fetchPackageVersions(packageName, signal);
   }
 
-  if (versionSpec !== null && packageName.length >= 2 && versionSpec.length > 0) {
+  const hasVersionConstraint = versionSpec !== null && packageName.length > 0 && versionSpec.length > 0;
+  if (hasVersionConstraint) {
     try {
       const packageResponse = await fetch(`https://registry.npmjs.org/${encodeURIComponent(packageName)}`, {
         signal,
       });
       if (!packageResponse.ok) {
-        return await performRegularSearch(trimmedQuery, limit, signal);
+        const responseFailure = packageResponse.statusText || `HTTP ${packageResponse.status}`;
+        throw new Error(`npm registry metadata lookup failed: ${responseFailure}`);
       }
 
       const packageData: NpmPackageMetadata = await packageResponse.json();
@@ -193,30 +195,16 @@ export async function searchNpmPackages(
 
       let resolvedVersion: string | null = null;
 
-      if (versionSpec === "latest") {
-        resolvedVersion = distTags.latest || Object.keys(versions).pop() || null;
-      } else if (distTags[versionSpec]) {
+      if (distTags[versionSpec]) {
         resolvedVersion = distTags[versionSpec];
       } else if (versions[versionSpec]) {
         resolvedVersion = versionSpec;
       } else {
-        const versionKeys = Object.keys(versions).sort((a, b) => {
-          try {
-            return semver.compare(b, a);
-          } catch {
-            return b.localeCompare(a);
-          }
-        });
-
-        resolvedVersion =
-          semver.maxSatisfying(versionKeys, versionSpec) ||
-          versionKeys.find((v) => v.startsWith(versionSpec)) ||
-          versionKeys[0] ||
-          null;
+        resolvedVersion = semver.maxSatisfying(Object.keys(versions), versionSpec);
       }
 
       if (!resolvedVersion || !versions[resolvedVersion]) {
-        return await performRegularSearch(trimmedQuery, limit, signal);
+        return [];
       }
 
       const versionResponse = await fetch(
@@ -224,7 +212,8 @@ export async function searchNpmPackages(
         { signal },
       );
       if (!versionResponse.ok) {
-        return await performRegularSearch(trimmedQuery, limit, signal);
+        const responseFailure = versionResponse.statusText || `HTTP ${versionResponse.status}`;
+        throw new Error(`npm registry resolved version lookup failed: ${responseFailure}`);
       }
 
       const versionData: NpmPackageVersion = await versionResponse.json();
@@ -244,7 +233,10 @@ export async function searchNpmPackages(
       if (error instanceof DOMException && error.name === "AbortError") {
         return [];
       }
-      return performRegularSearch(trimmedQuery, limit, signal);
+
+      throw new Error(
+        `Failed to resolve npm package version: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 

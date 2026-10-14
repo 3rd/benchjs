@@ -3,6 +3,7 @@ import type { IntervalEvidence } from "benchmate";
 import type { RunInfo } from "@/stores/benchmarkStore";
 import type { BenchmarkResult } from "@/services/benchmark/types";
 import { formatCount, formatDuration, formatOps } from "@/lib/formatters";
+import { EVIDENCE_LABELS, getResultEvidence } from "@/components/playground/result-evidence";
 import { MetricFigure } from "../MetricFigure";
 
 // Benchmate repeats each series-level verdict flag on every block in its phase group.
@@ -33,7 +34,14 @@ export const StatsPanel = ({ result, runInfo, wallTimeMs, chart }: StatsPanelPro
     interval && interval.upper !== null && opsMean !== null && opsMean > 0 ?
       `±${(((interval.upper - interval.lower) / 2 / opsMean) * 100).toFixed(2)}%`
     : null;
-  const ciCaption = interval ? `95% CI ${formatOpsInterval(interval)}` : "Indicative estimate";
+  const resultEvidence = getResultEvidence(result);
+  let ciCaption = EVIDENCE_LABELS.indicative;
+
+  if (!resultEvidence.hasEstimate) {
+    ciCaption = EVIDENCE_LABELS.unavailable;
+  } else if (interval) {
+    ciCaption = `95% CI ${formatOpsInterval(interval)}`;
+  }
 
   const flagCounts = new Map<string, number>();
   for (const observation of evidence.observations) {

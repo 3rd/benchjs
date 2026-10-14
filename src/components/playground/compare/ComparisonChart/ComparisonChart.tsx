@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 import {
   Bar,
   CartesianGrid,
@@ -17,6 +17,7 @@ import { CHART_COLORS, chartAxisTick, chartTooltipLabelStyle, chartTooltipStyle 
 import { formatCountShort } from "@/lib/formatters";
 import { isRankingEligible } from "@/components/playground/compare/comparison-ranking";
 import { getOpsPerSecond } from "@/components/playground/compare/comparison-rate";
+import { getResultEvidence } from "@/components/playground/result-evidence";
 
 interface ComparisonChartProps {
   implementations: Implementation[];
@@ -24,10 +25,20 @@ interface ComparisonChartProps {
 }
 
 export const ComparisonChart = ({ implementations, runs }: ComparisonChartProps) => {
+  const evidenceDescriptionId = useId();
   const barData = useMemo(() => {
     return implementations.map((item) => {
       const run = runs[item.id]?.at(-1);
       const opsPerSec = getOpsPerSecond(run);
+      const completedResult = run?.status === "completed" ? run.result : null;
+      const evidence = completedResult ? getResultEvidence(completedResult) : null;
+      let rateLabel = formatCountShort(opsPerSec);
+
+      if (evidence?.hasEstimate === false) {
+        rateLabel = "-";
+      } else if (evidence?.label) {
+        rateLabel += "*";
+      }
 
       // call-task intervals are already ops/s bounds
       const interval = run?.status === "completed" ? (run.result?.evidence.interval ?? null) : null;
@@ -37,18 +48,29 @@ export const ComparisonChart = ({ implementations, runs }: ComparisonChartProps)
       }
 
       return {
+        id: item.id,
         name: item.filename,
-        "Operations/sec": opsPerSec,
+        "Operations/sec": evidence?.hasEstimate === false ? null : opsPerSec,
+        rateLabel,
+        evidence,
         ci,
       };
     });
   }, [implementations, runs]);
 
-  const bestValue = Math.max(...barData.map((entry) => entry["Operations/sec"]));
+  const bestValue = Math.max(...barData.map((entry) => entry["Operations/sec"] ?? 0));
   const rankable = isRankingEligible(implementations.map((item) => ({ run: runs[item.id]?.at(-1) })));
   const highlightBest = rankable && bestValue > 0;
 
-  if (barData.every((entry) => entry["Operations/sec"] <= 0)) {
+  const qualifiedEntries = barData.flatMap(({ id, name, evidence }) => {
+    if (!evidence?.label) return [];
+
+    return [{ id, name, label: evidence.label, status: evidence.status, description: evidence.description }];
+  });
+
+  const hasRates = barData.some((entry) => (entry["Operations/sec"] ?? 0) > 0);
+  const isEmptyComparison = !hasRates && qualifiedEntries.length === 0;
+  if (isEmptyComparison) {
     return (
       <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
         No results yet. Run implementations to compare their performance.
@@ -57,8 +79,8 @@ export const ComparisonChart = ({ implementations, runs }: ComparisonChartProps)
   }
 
   return (
-    <div>
-      <div>
+    <figure aria-describedby={qualifiedEntries.length > 0 ? evidenceDescriptionId : undefined}>
+      {hasRates && (
         <ResponsiveContainer height={400} width="100%">
           <RechartsBarChart data={barData} margin={{ top: 20, right: 10, left: 20, bottom: 0 }}>
             <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
@@ -99,6 +121,7 @@ export const ComparisonChart = ({ implementations, runs }: ComparisonChartProps)
               {barData.map((entry) => (
                 <Cell
                   key={entry.name}
+                  aria-label={`${entry.name}: ${entry.rateLabel} ops/sec. ${entry.evidence?.label ?? ""} ${entry.evidence?.description ?? ""}`}
                   fill={
                     highlightBest && entry["Operations/sec"] === bestValue ?
                       CHART_COLORS.samples
@@ -107,17 +130,25 @@ export const ComparisonChart = ({ implementations, runs }: ComparisonChartProps)
                 />
               ))}
               <LabelList
-                dataKey="Operations/sec"
+                dataKey="rateLabel"
                 fill={CHART_COLORS.label}
                 fontSize={11}
-                formatter={(value) => formatCountShort(Number(value))}
                 position="top"
               />
               <ErrorBar dataKey="ci" stroke={CHART_COLORS.label} strokeWidth={1.5} width={6} />
             </Bar>
           </RechartsBarChart>
         </ResponsiveContainer>
-      </div>
-    </div>
+      )}
+      {qualifiedEntries.length > 0 && (
+        <figcaption id={evidenceDescriptionId} className="mt-3 space-y-2 text-xs text-amber-600 dark:text-amber-400">
+          {qualifiedEntries.map(({ id, name, label, status, description }) => (
+            <p key={id}>
+              {name} — {label} ({status}). {description}
+            </p>
+          ))}
+        </figcaption>
+      )}
+    </figure>
   );
 };

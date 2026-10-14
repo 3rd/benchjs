@@ -97,6 +97,123 @@ describe("searchNpmPackages", () => {
     ]);
   });
 
+  it.each([
+    ["demo-package", "999.0.0"],
+    ["demo-package", "^999"],
+    ["demo-package", "1.2."],
+    ["a", "999.0.0"],
+  ])("returns no substitute for %s@%s", async (packageName, versionSpec) => {
+    const query = `${packageName}@${versionSpec}`;
+    const metadataUrl = `https://registry.npmjs.org/${packageName}`;
+    const version = { name: packageName, version: "1.2.3" };
+    const requestedUrls = stubRegistry(
+      new Map<string, unknown>([
+        [metadataUrl, {
+          _id: packageName,
+          name: packageName,
+          "dist-tags": { latest: "1.2.3" },
+          versions: { "1.2.3": version },
+        }],
+        [`${metadataUrl}/1.2.3`, version],
+        [
+          `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(query)}&size=10`,
+          createSearchResponse("unrelated-package"),
+        ],
+      ]),
+    );
+
+    await expect(searchNpmPackages(query)).resolves.toEqual([]);
+    expect(requestedUrls).toEqual([metadataUrl]);
+  });
+
+  it("returns no version for latest when that tag is absent", async () => {
+    const metadataUrl = "https://registry.npmjs.org/demo-package";
+    const requestedUrls = stubRegistry(new Map<string, unknown>([
+      [metadataUrl, { ...createPackageMetadata("demo-package"), "dist-tags": {} }],
+      [`${metadataUrl}/20.0.0`, { name: "demo-package", version: "20.0.0" }],
+    ]));
+
+    await expect(searchNpmPackages("demo-package@latest")).resolves.toEqual([]);
+    expect(requestedUrls).toEqual([metadataUrl]);
+  });
+
+  it.each([
+    ["20.0.0", "20.0.0"],
+    ["latest", "20.0.0"],
+    ["^20", "20.1.0"],
+  ])("resolves %s to the matching published version %s", async (versionSpec, version) => {
+    const metadataUrl = "https://registry.npmjs.org/demo-package";
+    const requestedUrls = stubRegistry(new Map<string, unknown>([
+      [metadataUrl, createPackageMetadata("demo-package")],
+      [`${metadataUrl}/${version}`, { name: "demo-package", version }],
+    ]));
+
+    await expect(searchNpmPackages(`demo-package@${versionSpec}`)).resolves.toEqual([
+      expect.objectContaining({
+        name: `demo-package@${version}`,
+        packageName: "demo-package",
+        version,
+        label: `demo-package@${version}`,
+      }),
+    ]);
+    expect(requestedUrls).toEqual([metadataUrl, `${metadataUrl}/${version}`]);
+  });
+
+  it("reports a qualified metadata HTTP failure without switching to text search", async () => {
+    const requestedUrls = stubRegistry(new Map([
+      [
+        "https://registry.npmjs.org/-/v1/search?text=demo-package%40999.0.0&size=10",
+        createSearchResponse("unrelated-package"),
+      ],
+    ]));
+
+    await expect(searchNpmPackages("demo-package@999.0.0")).rejects.toThrow(
+      "Failed to resolve npm package version: npm registry metadata lookup failed: HTTP 404",
+    );
+    expect(requestedUrls).toEqual(["https://registry.npmjs.org/demo-package"]);
+  });
+
+  it("reports a resolved version HTTP failure without switching to text search", async () => {
+    const metadataUrl = "https://registry.npmjs.org/demo-package";
+    const requestedUrls = stubRegistry(new Map<string, unknown>([
+      [metadataUrl, createPackageMetadata("demo-package")],
+      [
+        "https://registry.npmjs.org/-/v1/search?text=demo-package%40latest&size=10",
+        createSearchResponse("unrelated-package"),
+      ],
+    ]));
+
+    await expect(searchNpmPackages("demo-package@latest")).rejects.toThrow(
+      "Failed to resolve npm package version: npm registry resolved version lookup failed: HTTP 404",
+    );
+    expect(requestedUrls).toEqual([metadataUrl, `${metadataUrl}/20.0.0`]);
+  });
+
+  it("reports malformed metadata for a qualified query", async () => {
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response("{")));
+
+    await expect(searchNpmPackages("demo-package@1")).rejects.toThrow(
+      /^Failed to resolve npm package version:/,
+    );
+  });
+
+  it("passes cancellation to a qualified lookup and returns no suggestions", async () => {
+    vi.stubGlobal("fetch", (_input: Request | URL | string, options?: RequestInit) => {
+      const signal = options?.signal;
+      assert(signal, "Expected the lookup's abort signal");
+
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason));
+      });
+    });
+
+    const controller = new AbortController();
+    const suggestions = searchNpmPackages("demo-package@1", 10, controller.signal);
+    controller.abort();
+
+    await expect(suggestions).resolves.toEqual([]);
+  });
+
   it("preserves unscoped package version lookup", async () => {
     const metadataUrl = "https://registry.npmjs.org/lodash";
     const requestedUrls = stubRegistry(new Map([[metadataUrl, createPackageMetadata("lodash")]]));

@@ -125,5 +125,65 @@ describe("ComparisonTable", () => {
 
     expect(output).toContain('<span class="font-semibold text-green-600">2,000</span>');
     expect(output).toContain(">Best</span>");
+    expect(output).not.toContain("Indicative estimate");
+    expect(output).not.toContain("Unreliable result");
+  });
+
+  it("qualifies a timer-limited rate without making it eligible for Best", () => {
+    const result = createBenchmarkResult("run-implementation-1", {
+      operationsPerSecond: { average: 2000 },
+    });
+    result.evidence.status = "timer-limited";
+
+    const output = renderTable({
+      "implementation-1": [createRun("implementation-1", { status: "completed", result })],
+      "implementation-2": [createCompletedRun("implementation-2", 1000)],
+    });
+
+    expect(output).toContain("2,000");
+    expect(output).toContain(">completed</td>");
+    expect(output).toContain("Indicative estimate");
+    expect(output).toContain("timer-limited");
+    expect(output).toContain("This browser&#x27;s clock is too coarse for a precise measurement here.");
+    expect(output).not.toContain(">Best</span>");
+  });
+
+  it("distinguishes an unavailable estimate from an indicative rate", () => {
+    const result = createBenchmarkResult("run-implementation-1", {
+      operationsPerSecond: { average: null, min: null, max: null },
+    });
+    result.evidence.status = "unidentifiable";
+
+    const output = renderTable({
+      "implementation-1": [createRun("implementation-1", { status: "completed", result })],
+    });
+
+    expect(output).toContain("Estimate unavailable");
+    expect(output).toContain("No reliable estimate could be produced from this run.");
+    expect(output).not.toContain("Indicative estimate");
+  });
+
+  it("preserves a precision-missed estimate and qualifies its interval", () => {
+    const result = createBenchmarkResult("run-implementation-1");
+    result.evidence.status = "precision-missed";
+    result.evidence.interval = {
+      confidenceLevelX: 0.95,
+      lower: 500,
+      upper: 1500,
+      method: "batch-t",
+      coverage: "nominal",
+      physicalCount: 10,
+      effectiveCount: 10,
+      assumptions: [],
+    };
+
+    const output = renderTable({
+      "implementation-1": [createRun("implementation-1", { status: "completed", result })],
+    });
+
+    expect(output).toContain("1,000");
+    expect(output).toContain("Unreliable result");
+    expect(output).toContain("The result is slightly less precise than targeted; the numbers are still usable.");
+    expect(output).not.toContain("Estimate unavailable");
   });
 });

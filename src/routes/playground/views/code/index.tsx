@@ -231,6 +231,8 @@ export const CodeView = ({ monacoTabs, dependencyService, documentId }: CodeView
                 store.renameImplementation(item.id, trimmedName);
               },
               onDelete: () => {
+                benchmarkService.discardRunsForImplementations(new Set([item.id]));
+
                 const deletedTab = monacoTabs.tabs.find((tab) => tab.id === item.id);
                 if (deletedTab) {
                   monacoTabs.closeTab(deletedTab);

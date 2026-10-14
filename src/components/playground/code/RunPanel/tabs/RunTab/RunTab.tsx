@@ -1,7 +1,8 @@
 import { useCallback } from "react";
 import { PlayIcon, SquareIcon, TriangleAlertIcon } from "lucide-react";
 import type { BenchmarkRun, ChartDataPoint, RunInfo } from "@/stores/benchmarkStore";
-import type { BenchmarkPhase, EvidenceStatus } from "@/services/benchmark/types";
+import type { BenchmarkPhase } from "@/services/benchmark/types";
+import { EVIDENCE_LABELS, getResultEvidence } from "@/components/playground/result-evidence";
 import { formatDuration, formatOps } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -15,24 +16,6 @@ const PHASE_LABELS: Record<BenchmarkPhase, string> = {
   pilot: "Pilot",
   assessment: "Assessment",
   measurement: "Measurement",
-};
-
-const STATUS_SENTENCES: Record<EvidenceStatus, string | null> = {
-  complete: null,
-  "timer-limited": "This browser's clock is too coarse for a precise measurement here.",
-  "warmup-not-converged":
-    "The benchmark couldn't reach a stable measurement — these numbers are indicative. Re-running usually resolves this.",
-  "dependence-unresolved":
-    "The benchmark couldn't reach a stable measurement — these numbers are indicative. Re-running usually resolves this.",
-  "insufficient-budget":
-    "The time budget ran out before the measurement finished — these numbers are indicative. Re-running usually resolves this.",
-  "precision-missed": "The result is slightly less precise than targeted; the numbers are still usable.",
-  unstable:
-    "Timing drifted during the measurement — these numbers are indicative. Close background work and re-run.",
-  "optimization-sensitive":
-    "Part of the measured code may have been optimized away; treat these numbers with care.",
-  unidentifiable: "No reliable estimate could be produced from this run.",
-  failed: "The run failed before producing a result.",
 };
 
 interface RunTabProps {
@@ -66,9 +49,9 @@ export const RunTab = ({
 
   const result = latestRun?.result;
   const phase = isRunning ? latestRun?.phase : null;
-  const status = result?.evidence.status ?? null;
-  const isReliable = status === "complete";
-  const statusSentence = status ? STATUS_SENTENCES[status] : null;
+  const resultEvidence = result ? getResultEvidence(result) : null;
+  const shouldShowEvidenceWarning = !isRunning && resultEvidence !== null && !resultEvidence.isReliable;
+  const statusSentence = isRunning ? null : resultEvidence?.description;
 
   const phaseLabel = phase ? PHASE_LABELS[phase] : "Starting";
   const progressLabel = isIndeterminate ? phaseLabel : `${phaseLabel} · ${(progress ?? 0).toFixed(0)}%`;
@@ -113,9 +96,9 @@ export const RunTab = ({
             />
           </div>
         )}
-        {!isRunning && status && !isReliable && (
+        {shouldShowEvidenceWarning && (
           <span className="py-0.5 px-2.5 text-xs font-medium text-amber-600 rounded-full whitespace-nowrap dark:text-amber-400 bg-amber-500/10">
-            Unreliable result
+            {EVIDENCE_LABELS.unreliable}
           </span>
         )}
         {elapsedTime > 0 && (
@@ -125,7 +108,7 @@ export const RunTab = ({
         )}
       </div>
 
-      {!isRunning && statusSentence && (
+      {statusSentence && (
         <div className="py-2 px-4 text-xs text-amber-600 border-b dark:text-amber-400 bg-amber-500/5">
           {statusSentence}
         </div>

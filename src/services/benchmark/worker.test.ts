@@ -98,6 +98,40 @@ it("forwards console output from module evaluation to its run before tasks start
   ]);
 });
 
+it("flushes buffered task output under its run before reporting a failed batch", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(0);
+
+  const handlers: Record<string, (event: BenchEvents["taskStart"]) => void> = {};
+  benchMocks.on.mockImplementation((event: string, handler: (event: BenchEvents["taskStart"]) => void) => {
+    handlers[event] = handler;
+  });
+  benchMocks.run.mockImplementationOnce(() => {
+    handlers.taskStart({ task: "run-2" });
+    console.log("before throw");
+    throw new Error("synthetic failure");
+  });
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("data:text/javascript,export%20default%20()%20%3D%3E%201%3B");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  const { listener, postMessage } = await startWorker();
+
+  await listener({
+    data: {
+      type: "start",
+      runs: [
+        { runId: "run-1", processedCode: "" },
+        { runId: "run-2", processedCode: "" },
+      ],
+    },
+  });
+
+  expect(postMessage.mock.calls.map(([message]) => message)).toEqual([
+    { type: "taskStart", runId: "run-2" },
+    { type: "consoleBatch", runId: "run-2", logs: [{ level: "log", message: "before throw", count: 1 }] },
+    { type: "error", runId: "run-1", error: "synthetic failure" },
+    { type: "error", runId: "run-2", error: "synthetic failure" },
+  ]);
+});
+
 it("logs errors, collections, undefined, functions, and symbols as readable text", async () => {
   const handlers: Record<string, (event: BenchEvents["taskStart"]) => void> = {};
   benchMocks.on.mockImplementation((event: string, handler: (event: BenchEvents["taskStart"]) => void) => {

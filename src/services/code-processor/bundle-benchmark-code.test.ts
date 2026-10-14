@@ -26,7 +26,7 @@ const executeBundledRun = async (
 ) => {
   const bundle = await bundleBenchmarkCode(userCode, setupCode);
   const module: unknown = await import(
-    `data:text/javascript;base64,${Buffer.from(bundle).toString("base64")}`
+    `data:text/javascript;base64,${Buffer.from(bundle).toString("base64")}#${crypto.randomUUID()}`
   );
   if (
     !module ||
@@ -52,11 +52,11 @@ const transformImportSource = async (source: string, libraries: Library[]) => {
 };
 
 describe("bundleBenchmarkCode", () => {
-  beforeAll(() => {
+  beforeEach(() => {
     vi.stubGlobal("location", new URL("https://benchjs.test"));
   });
 
-  afterAll(() => {
+  afterEach(() => {
     vi.unstubAllGlobals();
   });
 
@@ -171,6 +171,72 @@ describe("bundleBenchmarkCode", () => {
 
     it.each([
       [
+        "first",
+        `export const run = () => [first + second, ...order],
+          first = (order.push("first"), 3),
+          second = (order.push("second"), 4);`,
+      ],
+      [
+        "between siblings",
+        `export const first = (order.push("first"), 3),
+          run = () => [first + second, ...order],
+          second = (order.push("second"), 4);`,
+      ],
+      [
+        "last",
+        `export var first = (order.push("first"), 3),
+          second = (order.push("second"), 4),
+          run = () => [first + second, ...order];`,
+      ],
+    ])("should preserve sibling initialization when run is %s", async (_position, declaration) => {
+      expect(
+        await executeBundledRun(`const order: string[] = []; ${declaration}`),
+      ).toEqual([7, "first", "second"]);
+    });
+
+    it("should expose only the benchmark callable from a grouped export", async () => {
+      const bundle = await bundleBenchmarkCode(
+        `export const run = () => 7, label = "sample";`,
+        "",
+      );
+
+      const module: unknown = await import(
+        `data:text/javascript;base64,${Buffer.from(bundle).toString("base64")}`
+      );
+      assert(module && typeof module === "object");
+      expect(Object.keys(module)).toEqual(["default"]);
+      assert("default" in module && typeof module.default === "function");
+      expect(module.default()).toBe(7);
+    });
+
+    it("should preserve sibling helpers and both recursive bindings in a grouped export", async () => {
+      expect(
+        await executeBundledRun(
+          `
+            export const step = (n: number) => n - 1,
+              run = function recurse(n: number): number {
+                if (n === 0) return value;
+                if (n % 2 === 0) return run(step(n));
+                return recurse(step(n));
+              },
+              value = 7;
+          `,
+          { args: [5] },
+        ),
+      ).toBe(7);
+    });
+
+    it("should reject a reassigned run binding in a grouped export", async () => {
+      await expect(
+        bundleBenchmarkCode(
+          `export let run = () => "first", label = "sample"; run = () => "second";`,
+          "",
+        ),
+      ).rejects.toThrow("The benchmark run function must not be reassigned");
+    });
+
+    it.each([
+      [
         "an annotated local in a run arrow body",
         `export const run = () => { const x: number = 0; return x; };`,
         0,
@@ -255,6 +321,24 @@ describe("bundleBenchmarkCode", () => {
 
       expect(body).toContain("__benchmateBlackhole(data.reduce(sum, 0));");
     });
+
+    it("should protect a typed run body in a grouped export", async () => {
+      const discardedValues: unknown[] = [];
+      vi.stubGlobal("__benchmateBlackhole", (value: unknown) => {
+        discardedValues.push(value);
+      });
+
+      expect(
+        await executeBundledRun(`
+          export const run = (input: number = 3): number => {
+            const value: number = input * 2;
+            value + 1;
+            return value;
+          }, label = "sample";
+        `),
+      ).toBe(6);
+      expect(discardedValues).toEqual([7]);
+    });
   });
 
   describe("strip exports plugin", () => {
@@ -328,6 +412,95 @@ describe("bundleBenchmarkCode", () => {
   });
 
   describe("setup code", () => {
+    it("should expose a setup binding by its exported alias", async () => {
+      expect(
+        await executeBundledRun(`export const run = () => answer;`, {
+          setupCode: `const value = 7; export { value as answer };`,
+        }),
+      ).toBe(7);
+    });
+
+    it("should preserve an alias when its internal name matches another setup export", async () => {
+      expect(
+        await executeBundledRun(`export const run = () => x;`, {
+          setupCode: `let a = 1; let b = 2; export { a as x, b as _a };`,
+        }),
+      ).toBe(1);
+    });
+
+    it("should keep writes through setup aliases attached to one mutable binding", async () => {
+      expect(
+        await executeBundledRun(
+          `
+            export const run = () => {
+              answer++;
+              ({ alternate } = { alternate: 10 });
+              value += 2;
+              return [answer, alternate, value, readValue(), { answer }];
+            };
+          `,
+          {
+            setupCode: `
+              export let value = 7;
+              export { value as answer, value as "alternate" };
+              export const readValue = () => value;
+            `,
+          },
+        ),
+      ).toEqual([12, 12, 12, 12, { answer: 12 }]);
+    });
+
+    it("should let implementation declarations shadow aliases without changing setup references", async () => {
+      expect(
+        await executeBundledRun(
+          `const answer = 10; export const run = () => [answer, readValue()];`,
+          {
+            setupCode: `
+              const value = 7;
+              export { value as answer };
+              export const readValue = () => value;
+            `,
+          },
+        ),
+      ).toEqual([10, 7]);
+    });
+
+    it("should not expose the local name of an aliased-only setup export", async () => {
+      expect(
+        await executeBundledRun(`export const run = () => typeof value;`, {
+          setupCode: `const value = 7; export { value as answer };`,
+        }),
+      ).toBe("undefined");
+    });
+
+    it("should preserve nested implementation bindings when resolving setup aliases", async () => {
+      expect(
+        await executeBundledRun(
+          `
+            const readLocal = (answer: number) => answer;
+            export const run = (_value = 2) => [answer, readLocal(3), _value];
+          `,
+          { setupCode: `const value = 7; export { value as answer };` },
+        ),
+      ).toEqual([7, 3, 2]);
+    });
+
+    it("should initialize mutable setup aliases once in each implementation instance", async () => {
+      const setupCode = `
+        let calls = 0;
+        const initialize = () => ++calls;
+        export const initial = initialize();
+        export { calls as count };
+      `;
+      const implementationCode = `
+        const beforeRun = count;
+        export const run = () => [initial, beforeRun, ++count];
+      `;
+
+      expect(await executeBundledRun(implementationCode, { setupCode })).toEqual([1, 1, 2]);
+      expect(await executeBundledRun(implementationCode, { setupCode })).toEqual([1, 1, 2]);
+    });
+
     it("should hoist setup declarations above the run function", async () => {
       const body = await bundleRunBody(`export const run = () => data.length;`, `export const data = [1, 2, 3];`);
 

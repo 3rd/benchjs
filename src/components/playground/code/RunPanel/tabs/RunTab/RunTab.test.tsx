@@ -87,6 +87,19 @@ describe("RunTab", () => {
     expect(output).not.toContain("No benchmark runs yet");
   });
 
+  it("labels a null throughput estimate as unavailable", () => {
+    const result = createBenchmarkResult("test", {
+      operationsPerSecond: { average: null, min: null, max: null },
+    });
+    result.evidence.status = "unidentifiable";
+
+    const output = renderRunTab(createRun("completed", result));
+
+    expect(output).toContain("Estimate unavailable");
+    expect(output).toContain("No reliable estimate could be produced from this run.");
+    expect(output).not.toContain("Indicative estimate");
+  });
+
   it("counts per-block flags but reports a series-wide flag once", () => {
     const output = renderRunTab(
       createRun(

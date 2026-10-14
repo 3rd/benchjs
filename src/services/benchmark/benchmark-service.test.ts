@@ -48,9 +48,25 @@ const getLatestRun = (implementationId: string) => {
 };
 
 const dispatchWorkerMessage = (message: WorkerToMainMessage, listenerIndex = -1) => {
-  const listener = benchmarkMocks.addEventListener.mock.calls.at(listenerIndex)?.[1];
-  if (typeof listener !== "function") throw new Error("Worker message listener not found");
+  const listener = benchmarkMocks.addEventListener.mock.calls
+    .filter(([type]) => type === "message")
+    .at(listenerIndex)?.[1];
+  if (typeof listener !== "function") {
+    throw new Error("Worker message listener not found");
+  }
+
   listener({ data: message });
+};
+
+const dispatchWorkerError = (event: Event, listenerIndex = -1) => {
+  const listener = benchmarkMocks.addEventListener.mock.calls
+    .filter(([type]) => type === "error")
+    .at(listenerIndex)?.[1];
+  if (typeof listener !== "function") {
+    throw new Error("Worker error listener not found");
+  }
+
+  listener(event);
 };
 
 type CompleteWorkerMessage = Extract<
@@ -303,7 +319,10 @@ describe("benchmark session lifecycle", () => {
       },
       0,
     );
+    dispatchWorkerError(new Event("error"), 0);
     expect(getLatestRun("first").status).toBe("cancelled");
+    expect(getLatestRun("third").status).toBe("running");
+    expect(benchmarkMocks.terminate).toHaveBeenCalledTimes(1);
 
     benchmarkService.stopBenchmark(getLatestRun("third").id);
     await expect(sessionB.resultPromise).resolves.toEqual([]);
@@ -395,6 +414,82 @@ describe("benchmark session lifecycle", () => {
     expect(documentMocks.removeEventListener).toHaveBeenCalledTimes(1);
     benchmarkService.dispose();
     expect(benchmarkMocks.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles a native worker startup failure and allows a successful retry", async () => {
+    const { resultPromise } = await startBenchmark([implementations[0]]);
+
+    dispatchWorkerError(new Event("error"));
+
+    expect(getLatestRun("first")).toMatchObject({
+      status: "failed",
+      error: "Failed to start benchmark worker",
+      result: null,
+    });
+    await expect(resultPromise).resolves.toEqual([]);
+    expect(benchmarkMocks.terminate).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(documentMocks.removeEventListener).toHaveBeenCalledTimes(1);
+    expect(documentMocks.removeEventListener).toHaveBeenCalledWith(
+      "visibilitychange",
+      documentMocks.addEventListener.mock.calls[0][1],
+    );
+
+    benchmarkService.dispose();
+    expect(benchmarkMocks.terminate).toHaveBeenCalledTimes(1);
+
+    const replacement = await startBenchmark([implementations[0]]);
+    const run = getLatestRun("first");
+
+    dispatchWorkerMessage(createCompleteMessage(run.id));
+    const results = await replacement.resultPromise;
+    expect(results.map((result) => result.name)).toEqual([run.id]);
+
+    dispatchWorkerError(new Event("error"));
+    expect(getLatestRun("first").status).toBe("completed");
+    expect(benchmarkMocks.terminate).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves completed results while failing active batch runs with the native error message", async () => {
+    const { resultPromise } = await startBenchmark(implementations);
+    const completedRun = getLatestRun("first");
+    const completedResult = createBenchmarkResult(completedRun.id);
+    useBenchmarkStore.getState().updateRun(completedRun.id, {
+      status: "completed",
+      result: completedResult,
+    });
+    dispatchWorkerMessage({
+      type: "warmupStart",
+      runId: getLatestRun("second").id,
+    });
+
+    dispatchWorkerError(Object.assign(new Event("error"), {
+      message: "Worker module initialization failed",
+    }));
+
+    expect(getRuns().map(({ status, error }) => ({ status, error }))).toEqual([
+      { status: "completed", error: null },
+      { status: "failed", error: "Worker module initialization failed" },
+      { status: "failed", error: "Worker module initialization failed" },
+    ]);
+    expect(getLatestRun("first").result).toEqual(completedResult);
+    await expect(resultPromise).resolves.toEqual([]);
+    expect(benchmarkMocks.terminate).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("settles synchronous worker construction failures", async () => {
+    benchmarkMocks.constructWorker.mockImplementationOnce(() => {
+      throw new Error("Worker construction blocked");
+    });
+
+    await expect(benchmarkService.runBenchmark("", [implementations[0]])).resolves.toEqual([]);
+    expect(getLatestRun("first")).toMatchObject({
+      status: "failed",
+      error: "Worker construction blocked",
+    });
+    expect(benchmarkMocks.terminate).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("disposes a session while preprocessing is pending", async () => {

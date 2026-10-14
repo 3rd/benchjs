@@ -345,6 +345,8 @@ const handleStartRuns = async (
       crossOriginIsolated: self.crossOriginIsolated,
     });
   } catch (error) {
+    flushLogs(true);
+
     // send errors
     for (const run of runs) {
       postMessage({
